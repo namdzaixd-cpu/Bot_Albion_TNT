@@ -90,6 +90,8 @@ class AloTtsCog(commands.Cog):
         self.tts_queues = {}
         # tts_workers[guild_id] = asyncio.Task đang xử lý queue
         self.tts_workers = {}
+        # cờ đánh dấu đã chạy tự động vào lại voice sau khi khởi động (tránh reconnect storm khi gateway resume)
+        self._startup_reconnect_done = False
 
     async def enqueue_tts(self, guild: discord.Guild, text: str, author_name: str):
         if not text or not text.strip():
@@ -190,6 +192,47 @@ class AloTtsCog(commands.Cog):
                 self.voice_sessions.pop(guild.id, None)
                 self.mute_state.pop(guild.id, None)
 
+    @commands.Cog.listener()
+    async def on_ready(self):
+        """Khi bot khởi động (sau mỗi lần Render redeploy / restart), tự động vào
+        lại các voice channel đã bật cấu hình rejoin — chống bot bị văng khỏi voice
+        mỗi lần push code lên."""
+        if self._startup_reconnect_done:
+            return
+        self._startup_reconnect_done = True
+        # Chạy nền, delay để guild/channel cache load xong trước khi connect
+        self.bot.loop.create_task(self._restore_voice_on_startup())
+
+    async def _restore_voice_on_startup(self, retries: int = 6, delay: int = 8):
+        await asyncio.sleep(delay)  # chờ gateway + cache kênh ổn định
+        config = load_tts_config()
+        rejoin_cfg = config.get("rejoin", {})
+        for channel_id_str, enabled in rejoin_cfg.items():
+            if not enabled:
+                continue
+            channel_id = int(channel_id_str)
+            for attempt in range(1, retries + 1):
+                try:
+                    channel = self.bot.get_channel(channel_id)
+                    if not channel:
+                        # channel chưa nằm trong cache, chờ thêm rồi thử lại
+                        await asyncio.sleep(3)
+                        continue
+                    guild = channel.guild
+                    vc = guild.voice_client
+                    if vc and vc.is_connected():
+                        if vc.channel.id != channel.id:
+                            await vc.move_to(channel)
+                    else:
+                        await channel.connect()
+                    self.voice_sessions[guild.id] = {"channel_id": channel.id, "intentional_leave": False}
+                    self.mute_state[guild.id] = False
+                    print(f"🔄 [ALO] Đã tự vào lại voice {channel.name} sau khi khởi động")
+                    break
+                except Exception as e:
+                    print(f"⚠️ [ALO] Startup reconnect thất bại (lần {attempt}/{retries}): {e}")
+                    await asyncio.sleep(5)
+
     @app_commands.command(name="alojoin", description="Bot join (hoặc kéo qua) voice channel bạn đang đứng")
     async def alojoin_cmd(self, interaction: discord.Interaction):
         guild = interaction.guild
@@ -256,7 +299,7 @@ class AloTtsCog(commands.Cog):
         await self.enqueue_tts(guild, noi_dung.strip(), interaction.user.display_name)
         await interaction.response.send_message(f"📢 Đã gửi vào hàng chờ đọc ở **{voice.name}**!", ephemeral=True)
 
-    @app_commands.command(name="aloconfig", description="Cấu hình tự động rejoin khi bị kick/rớt mạng cho 1 voice channel (Officer only)")
+    @app_commands.command(name="aloconfig", description="Bật/tắt bot tự động ở lại voice này: khi bị kick/rớt mạng VÀ khi bot restart (redeploy) (Officer only)")
     @app_commands.describe(rejoin="Bật/tắt tự động rejoin", voice="Voice channel cần config (mặc định = voice bot đang ở)")
     @app_commands.choices(rejoin=[
         app_commands.Choice(name="Bật", value="on"),
