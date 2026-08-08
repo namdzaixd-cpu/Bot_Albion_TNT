@@ -76,3 +76,6 @@ web_dashboard/nul
 supabase/.temp/
 scripts/_diag.sql
 scripts/_diag2.sql
+
+# Dump game file Albion (raw .bin + out XML) — chỉ dùng cục bộ để build item DB
+scripts/albion-item/
