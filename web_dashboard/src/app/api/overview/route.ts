@@ -78,13 +78,16 @@ export async function GET() {
       })
     );
 
-    return NextResponse.json({
-      stats,
-      modules,
-      activity,
-      siphoned_count: siphoned.count ?? 0,
-      updated_at: new Date().toISOString(),
-    });
+    return new NextResponse(
+      JSON.stringify({
+        stats,
+        modules,
+        activity,
+        siphoned_count: siphoned.count ?? 0,
+        updated_at: new Date().toISOString(),
+      }),
+      { headers: { "Cache-Control": "no-store" } }
+    );
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : "Lỗi không xác định";
     return NextResponse.json({ error: msg }, { status: 500 });

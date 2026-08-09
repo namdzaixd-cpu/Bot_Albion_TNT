@@ -20,11 +20,14 @@ export async function GET() {
     const last = payload.last_seen ? new Date(payload.last_seen).getTime() : 0;
     const online = !!payload.online && Date.now() - last < 90_000;
 
-    return NextResponse.json({
-      online,
-      last_seen: payload.last_seen ?? null,
-      latency_ms: payload.latency_ms ?? null,
-    });
+    return new NextResponse(
+      JSON.stringify({
+        online,
+        last_seen: payload.last_seen ?? null,
+        latency_ms: payload.latency_ms ?? null,
+      }),
+      { headers: { "Cache-Control": "no-store" } }
+    );
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : "Lỗi";
     return NextResponse.json({ error: msg, online: false }, { status: 500 });
