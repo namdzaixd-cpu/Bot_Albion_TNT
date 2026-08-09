@@ -30,7 +30,9 @@ sys.path.append(os.path.join(_REPO_ROOT, "bot"))
 
 try:
     from dotenv import load_dotenv
-    load_dotenv(os.path.join(_REPO_ROOT, ".env"))
+    load_dotenv(os.path.join(_REPO_ROOT, ".env"), override=False)
+    # Ưu tiên key MỚI nhất do user thêm bằng dòng ĐẦU TIÊN trong .env
+    # (dotenv đọc cuối thắng nên có thể chọn nhầm key cũ hết quota)
 except ImportError:
     pass
 
@@ -46,7 +48,7 @@ ITEMS_XML = os.path.join(DUMP_DIR, "items.xml")
 SPELLS_XML = os.path.join(DUMP_DIR, "spells.xml")
 LOCALIZATION_XML = os.path.join(DUMP_DIR, "localization.xml")
 
-GEMINI_MODEL = "gemini-2.0-flash-exp"          # gần chuẩn nhất mặc định
+GEMINI_MODEL = "gemini-3.5-flash"             # model mới 2026 (2.x-flash hết hạn cho user mới)
 GEMINI_URL = (
     "https://generativelanguage.googleapis.com/v1beta/models/"
     + GEMINI_MODEL
@@ -72,14 +74,23 @@ Quy tắc:
 - Không viết thêm gì khác, không ghi chú.
 """
 
-def _call_gemini_sync(system: str, parts: list[dict], api_key: str, timeout: int = 60) -> str:
-    """Gọi Gemini generateContent đồng bộ. Raise RuntimeError khi lỗi."""
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={api_key}"
+def _call_gemini_sync(system: str, parts: list[dict], api_key: str, timeout: int = 120) -> str:
+    """Gọi Gemini generateContent đồng bộ. Raise RuntimeError khi lỗi (kể cả lỗi mạng). Trả (text, retry_after)."""
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
     payload = {
         "systemInstruction": {"parts": [{"text": system}]},
         "contents": [{"parts": parts}],
     }
-    resp = requests.post(url, json=payload, timeout=timeout)
+    headers = {"x-goog-api-key": api_key}   # key AQ (auth key 2026): truyền qua header, KHÔNG ?key=
+    try:
+        resp = requests.post(url, json=payload, headers=headers, timeout=timeout)
+    except requests.RequestException as exc:
+        raise RuntimeError(f"Gọi Gemini lỗi: {exc}") from exc
+    if resp.status_code == 429:
+        # Đang vượt quota free (20 rpm) — Google gửi Retry-After; chờ đúng thời gian đó.
+        retry = resp.headers.get("Retry-After")
+        wait = min(float(retry) if retry else 60.0, 300.0)
+        raise RuntimeError(f"429 quota — chờ {wait:.0f}s rồi thử lại.", wait)
     if resp.status_code != 200:
         raise RuntimeError(resp.text[:400])
     data = resp.json()
@@ -114,8 +125,8 @@ def _build_batch(entries: list[dict], start: int, size: int) -> list[dict]:
     return entries[start:start + size]
 
 
-def _run_batch(batch, api_key, out, attempts=2):
-    """Gọi Gemini cho 1 batch; retry 1-2 lần nếu lỗi; cập nhật out."""
+def _run_batch(batch, api_key, out, attempts=3):
+    """Gọi Gemini cho 1 batch; retry nếu lỗi (429 chờ Retry-After); cập nhật out."""
     parts = []
     for i, it in enumerate(batch, 1):
         parts.append({"text": (
@@ -129,8 +140,9 @@ def _run_batch(batch, api_key, out, attempts=2):
             reply = _call_gemini_sync(SYSTEM_PROMPT, parts, api_key)
         except RuntimeError as exc:
             last_err = exc
-            logger.warning("  [%d/%d] lỗi %s — thử lại sau %ds", attempt, attempts, exc, 4 * attempt)
-            time.sleep(4 * attempt)
+            wait = exc.args[1] if len(exc.args) > 1 else 4 * attempt
+            logger.warning("  [%d/%d] lỗi %s — chờ %ds", attempt, attempts, exc, wait)
+            time.sleep(wait)
             continue
         parsed = _parse_reply(reply, batch)
         for key, val in parsed.items():
@@ -152,6 +164,18 @@ def main() -> None:
         logger.error("Thiếu GEMINI_API_KEY trong .env — cần để dịch thật (dry-run vẫn chạy).")
         if not args.dry_run:
             sys.exit(1)
+    # Nếu .env có NHIỀU dòng GEMINI_API_KEY (key dự phòng do user giữ lại):
+    # chọn dòng ĐẦU TIÊN (key mới nhất user thêm) — dòng cuối chỉ dùng khi thiếu.
+    env_path = os.path.join(_REPO_ROOT, ".env")
+    if os.path.exists(env_path):
+        key_first = ""
+        for line in open(env_path, encoding="utf-8", errors="ignore"):
+            line = line.strip()
+            if line.startswith("GEMINI_API_KEY=") and not line.startswith("#"):
+                key_first = line.split("=", 1)[1].strip()
+                break
+        if key_first:
+            api_key = key_first
 
     # Xây set skill id thuộc item trang bị bằng chính parser build (XML trực tiếp,
     # không cần Supabase) → chỉ dịch những skill thật sự dùng trên item.
@@ -207,6 +231,16 @@ def main() -> None:
                     -(-len(entries) // args.batch_size), args.batch_size)
         return
 
+    def _checkpoint() -> None:
+        """Lưu map tạm sau mỗi batch — khi crash giữa chừng, lần sau resume không mất công dịch lại."""
+        for sid, val in out.items():
+            tr_spells.setdefault(sid, {}).update(val)
+        final = {"meta": {"model": GEMINI_MODEL, "generated_n": len(tr_spells)}, "spells": tr_spells}
+        try:
+            save_json(final, TRANSLATION_KEY)
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Checkpoint lưu Supabase thất bại (tiếp tục dịch): %s", exc)
+
     out: dict[str, dict] = {}
     start = 0
     calls = 0
@@ -218,16 +252,8 @@ def main() -> None:
         if start < len(entries):
             time.sleep(1)   # rate-limit: 1 req/s ("free" an toàn)
     logger.info("Đã dịch %d skill trong %d calls.", len(out), calls)
+    _checkpoint()
 
-    # merge với map cũ (giữ key chưa đụng)
-    for sid, val in out.items():
-        tr_spells.setdefault(sid, {}).update(val)
-    final = {"meta": {"model": GEMINI_MODEL, "generated_n": len(tr_spells)}, "spells": tr_spells}
-    try:
-        save_json(final, TRANSLATION_KEY)
-    except Exception as exc:  # noqa: BLE001
-        logger.error("Lưu map translation lên Supabase thất bại: %s", exc)
-        sys.exit(1)
     logger.info("Đã lưu %d skills map → %s", len(tr_spells), TRANSLATION_KEY)
 
 

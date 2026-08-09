@@ -25,7 +25,7 @@ from core.permissions import is_officer
 from core.permissions import is_officer
 from core.storage import load_json, save_json
 from core.database import execute
-from core.data.albion_item import format_item_compact, search_items
+from core.data.albion_item import format_item_compact, format_item_full, search_items
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 OLLAMA_URL = "https://ollama.com/api/chat"
@@ -37,7 +37,7 @@ FAILOVER_CHAIN = [
     {"provider": "openrouter", "model": "nvidia/nemotron-3-ultra-550b-a55b:free"},
     {"provider": "gemini", "model": "gemini-3.1-flash-lite"},
     {"provider": "openrouter", "model": "inclusionai/ling-3.0-flash:free"},
-    {"provider": "gemini", "model": "gemini-2.5-flash"},
+    {"provider": "gemini", "model": "gemini-3.5-flash"},
     {"provider": "ollama", "model": "gpt-oss:120b"},
     {"provider": "openrouter", "model": "openrouter/free"},
 ]
@@ -240,8 +240,8 @@ class ChatAI(commands.Cog):
             return ""
             
         try:
-            # Luôn dùng gemini-2.5-flash hoặc gemini-1.5-flash để OCR vì model này hỗ trợ multimodal tốt nhất
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
+            # Luôn dùng gemini-3.5-flash để OCR vì model này hỗ trợ multimodal
+            url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent"
             payload = {
                 "contents": [{
                     "parts": [
@@ -250,8 +250,9 @@ class ChatAI(commands.Cog):
                     ]
                 }]
             }
+            headers = {"x-goog-api-key": GEMINI_API_KEY}  # key AQ (auth key 2026): qua header, KHÔNG ?key=
             async with aiohttp.ClientSession() as session:
-                async with session.post(url, json=payload) as resp:
+                async with session.post(url, json=payload, headers=headers) as resp:
                     if resp.status == 200:
                         data = await resp.json()
                         return data["candidates"][0]["content"]["parts"][0]["text"]
@@ -486,13 +487,14 @@ class ChatAI(commands.Cog):
         """Trả về text trả lời, None nếu thiếu API key, raise Exception nếu gọi lỗi."""
         if not GEMINI_API_KEY:
             return None
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={GEMINI_API_KEY}"
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
         payload = {
             "systemInstruction": {"parts": [{"text": system_instruction}]},
             "contents": [{"parts": gemini_parts}],
         }
+        headers = {"x-goog-api-key": GEMINI_API_KEY}  # key AQ (auth key 2026): qua header, KHÔNG ?key=
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=timeout)) as session:
-            async with session.post(url, json=payload) as resp:
+            async with session.post(url, json=payload, headers=headers) as resp:
                 data = await resp.json()
                 if resp.status != 200:
                     raise RuntimeError(data.get("error", {}).get("message", f"HTTP {resp.status}"))
@@ -776,16 +778,24 @@ class ChatAI(commands.Cog):
         if not idx:
             return ""
         block = "--- KHO DỮ LIỆU ITEM ALBION (từ DB game offline, chỉ dùng dữ liệu trong đây) ---\n"
+        # Item chính đầu tiên hiển thị ĐẦY ĐỦ (stat + skill kèm mô tả + passive),
+        # các kết quả khác hiển thị gọn (bổ sung ngữ cảnh).
+        first = True
         for uid in uids:
             it = idx["items"].get(uid)
             if not it:
                 continue
-            block += format_item_compact(uid, it) + "\n"
+            if first:
+                block += format_item_full(uid, it, max_desc=500) + "\n"
+                first = False
+            else:
+                block += format_item_compact(uid, it) + "\n"
             if len(block) > max_chars:
                 block = block[:max_chars]
                 break
         block += "--------------------------------------\n\n"
-        block += ("Trả lời bằng tiếng Việt chỉ dựa trên data trên. "
+        block += ("Trả lời bằng tiếng Việt, đầy đủ từ stat đến skill, giải thích thuật ngữ cho người mới. "
+                  "Chỉ dùng dữ liệu trên. "
                   "Nếu người dùng hỏi skill/stats item không có trong đoạn, nói rõ 'không có data'. "
                   "KHÔNG bịa số liệu, tên skill, cooldown.\n\n")
         return block

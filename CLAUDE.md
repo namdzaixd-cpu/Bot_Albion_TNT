@@ -135,6 +135,15 @@ Khi có yêu cầu mới, rule mới hoặc chỉ dẫn từ người dùng (Use
 Từ nay khi user mô tả tính năng mới trong quá trình phát triển, BẮT BUỘC phải tự động lưu mô tả cơ chế hoạt động và chi tiết cách hoạt động của tính năng đó vào một file riêng (vd: `docs/features.md` hoặc một markdown file tương ứng).
 Việc này đảm bảo dữ liệu không bị thất lạc và có thể dùng trực tiếp để đưa lên web dashboard hoặc viết tài liệu hướng dẫn sau này.
 
+### ⛔ Quy tắc BẢO VỆ file .env (TUYỆT ĐỐI)
+- **KHÔNG BAO GIỜ xóa hoặc ghi đè dòng/biến trong file `.env`** của user.
+- Mọi thay đổi cấu hình (thêm key, sửa biến) chỉ được **thêm MỚI** (append dòng mới hoặc thêm biến mới),
+  **giữ nguyên** các dòng hiện có.
+- Nếu cần đổi giá trị biến (vd `GEMINI_API_KEY`): **thêm 1 dòng mới có giá trị đúng** phía sau, KHÔNG sửa/xóa
+  dòng cũ. (Python `dotenv` đọc dòng cuối cùng có tên biến → giá trị mới thắng, dòng cũ được giữ làm bản dự)
+  phòng).
+- Lý do: `.env` có thể chứa nhiều key/dự phòng do user tự quản, và việc xóa nhầm sẽ mất cấu hình không thể khôi phục.
+
 ### Quy tắc quản lý Script tiện ích (Helper/Hotfix)
 Khi tạo các script tiện ích, script vá lỗi (helper/hotfix/utility scripts) phát sinh trong quá trình phát triển dự án, BẮT BUỘC phải đặt chúng vào thư mục [scripts/](file:///Users/twot/Documents/CODE/Bot_Albion_TNC/scripts) thay vì thư mục gốc (root directory). Việc này giúp giữ cho thư mục gốc luôn gọn gàng và dễ dàng tìm kiếm/tham khảo các script này khi cần.
 

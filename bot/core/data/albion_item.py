@@ -77,6 +77,7 @@ def search_items(query: str, limit: int = 3) -> list[tuple[str, dict]]:
     idx = load_items()
     if not idx:
         return []
+    q_raw = (query or "").strip().lower()
     q = _norm(query).strip()
     if not q:
         return []
@@ -86,6 +87,7 @@ def search_items(query: str, limit: int = 3) -> list[tuple[str, dict]]:
     for uid, it in idx["items"].items():
         name_n = _norm(it.get("name", ""))
         namevi_n = _norm(it.get("name_vi", ""))
+        name_raw = (it.get("name", "") or "").lower()
         hay = f"{name_n} {namevi_n} {uid}"
         hay_nospace = hay.replace(" ", "")
         if name_n == q or namevi_n == q or uid.lower() == q_nospace:
@@ -93,6 +95,9 @@ def search_items(query: str, limit: int = 3) -> list[tuple[str, dict]]:
         elif len(q_words) == 1:
             # query 1 từ: substring trong tên (bắt 'axe'→'greataxe')
             score = 50 if q_words[0] in hay_nospace else 0
+            # tiếng Việt: ưu tiên tên thật có chứa từ gốc (giữ dấu)
+            if score and q_raw in name_raw:
+                score = 60
         else:
             # multi-word: đếm token nào substring trong tên
             score = 10 * sum(1 for w in q_words if w in hay_nospace)
@@ -126,7 +131,8 @@ def format_item_full(uid: str, item: dict, max_desc: int = 1200) -> str:
     stats = item.get("stats", {}) or {}
     parts = []
     for label, k in (("IP", "itempower"), ("ATK", "attackdamage"), ("HP", "hitpointsmax"),
-                     ("En", "energymax"), ("Move", "movespeed")):
+                     ("Def", "physicalarmor"), ("Mag", "magicresistance"),
+                     ("Năng", "energymax"), ("Move", "movespeed")):
         if stats.get(k):
             parts.append(f"{label} {stats[k]}")
     if parts:
