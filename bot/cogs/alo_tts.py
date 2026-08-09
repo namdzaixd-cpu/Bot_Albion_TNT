@@ -299,7 +299,7 @@ class AloTtsCog(commands.Cog):
         await self.enqueue_tts(guild, noi_dung.strip(), interaction.user.display_name)
         await interaction.response.send_message(f"📢 Đã gửi vào hàng chờ đọc ở **{voice.name}**!", ephemeral=True)
 
-    @app_commands.command(name="aloconfig", description="Bật/tắt bot tự động ở lại voice này: khi bị kick/rớt mạng VÀ khi bot restart (redeploy) (Officer only)")
+    @app_commands.command(name="aloconfig", description="Bật/tắt bot tự động ở lại voice (khi rớt mạng hoặc restart) — Officer")
     @app_commands.describe(rejoin="Bật/tắt tự động rejoin", voice="Voice channel cần config (mặc định = voice bot đang ở)")
     @app_commands.choices(rejoin=[
         app_commands.Choice(name="Bật", value="on"),
