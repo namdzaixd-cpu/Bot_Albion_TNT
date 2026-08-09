@@ -31,7 +31,7 @@ function isAdminId(userId?: string | null): boolean {
 
 const WRITE_METHODS = new Set(["POST", "PATCH", "PUT", "DELETE"]);
 
-export async function middleware(req: NextRequest) {
+export default async function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
   // Luồng NextAuth phải để đi qua, nếu không sẽ không đăng nhập được.

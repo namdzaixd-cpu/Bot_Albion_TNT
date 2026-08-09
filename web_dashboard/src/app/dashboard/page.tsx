@@ -115,7 +115,7 @@ export default function Dashboard() {
   // ── Chặn truy cập khi chưa đăng nhập ────────────────────────────────────
   if (status === "loading") {
     return (
-      <div className="flex h-screen items-center justify-center bg-background text-text-muted">
+      <div className="relative z-10 flex h-screen items-center justify-center bg-background text-text-muted">
         Đang kiểm tra đăng nhập...
       </div>
     );
@@ -123,7 +123,7 @@ export default function Dashboard() {
 
   if (status === "unauthenticated") {
     return (
-      <div className="flex h-screen flex-col items-center justify-center gap-6 bg-background px-6 text-center">
+      <div className="relative z-10 flex h-screen flex-col items-center justify-center gap-6 bg-background px-6 text-center">
         <Shield className="w-14 h-14 text-[#5865F2]" />
         <div>
           <h1 className="text-2xl font-bold text-white mb-2">Khu vực quản trị</h1>
