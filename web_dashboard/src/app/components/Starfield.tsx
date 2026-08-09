@@ -5,8 +5,8 @@ const STARS = Array.from({ length: 90 }, (_, i) => {
   // deterministic pseudo-random based on index
   const a = Math.sin(i * 12.9898) * 43758.5453;
   const b = Math.sin(i * 78.233) * 12543.123;
-  const x = (a - Math.floor(a)) * 100;
-  const y = (b - Math.floor(b)) * 100;
+  const x = Number((((a - Math.floor(a)) * 100)).toFixed(4));
+  const y = Number((((b - Math.floor(b)) * 100)).toFixed(4));
   const s = 1 + ((i * 7) % 3); // 1-3px
   const tw = 2.5 + ((i * 3) % 5); // 2.5-6.5s
   const delay = (i % 7) * 0.4;

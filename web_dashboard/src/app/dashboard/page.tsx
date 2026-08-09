@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import { useSession } from "next-auth/react";
+import { useSession, signIn } from "next-auth/react";
 import SearchableSelect, { Option } from "@/components/SearchableSelect";
 import AIDashboard from "./ai/page";
 import LogsDashboard from "./logs/page";
@@ -29,7 +29,7 @@ const MODULES = [
 ];
 
 export default function Dashboard() {
-  const { data: session } = useSession();
+  const { data: session, status } = useSession();
   const [activeModule, setActiveModule] = useState('overview');
   const [collapsed, setCollapsed] = useState(false);
 
@@ -112,6 +112,39 @@ export default function Dashboard() {
   };
 
 
+  // ── Chặn truy cập khi chưa đăng nhập ────────────────────────────────────
+  if (status === "loading") {
+    return (
+      <div className="flex h-screen items-center justify-center bg-background text-text-muted">
+        Đang kiểm tra đăng nhập...
+      </div>
+    );
+  }
+
+  if (status === "unauthenticated") {
+    return (
+      <div className="flex h-screen flex-col items-center justify-center gap-6 bg-background px-6 text-center">
+        <Shield className="w-14 h-14 text-[#5865F2]" />
+        <div>
+          <h1 className="text-2xl font-bold text-white mb-2">Khu vực quản trị</h1>
+          <p className="text-text-muted max-w-md">
+            Bạn cần đăng nhập bằng Discord để xem và chỉnh sửa cấu hình bot.
+          </p>
+        </div>
+        <button
+          onClick={() => signIn("discord")}
+          className="bg-[#5865F2] hover:bg-[#4752C4] text-white px-6 py-3 rounded-lg font-semibold transition-colors shadow-lg shadow-[#5865F2]/20"
+        >
+          Đăng nhập bằng Discord
+        </button>
+        <Link href="/" className="text-sm text-text-muted hover:text-white transition-colors">
+          ← Về trang chủ
+        </Link>
+      </div>
+    );
+  }
+  // ────────────────────────────────────────────────────────────────────────
+
   return (
     <div className="flex h-screen bg-background overflow-hidden">
       <CommandPalette onSelect={setActiveModule} />
@@ -156,7 +189,7 @@ export default function Dashboard() {
             <img src={session?.user?.image || 'https://cdn.discordapp.com/embed/avatars/0.png'} alt="Avatar" className="w-10 h-10 rounded-full border border-border" />
             <div className="overflow-hidden">
               <p className="text-sm font-bold text-white truncate">{session?.user?.name || 'Guest'}</p>
-              <p className="text-xs text-text-muted truncate">Quản trị viên</p>
+              <p className="text-xs text-text-muted truncate">{(session?.user as { isAdmin?: boolean })?.isAdmin ? 'Quản trị viên' : 'Chỉ xem'}</p>
             </div>
           </div>
         </div>

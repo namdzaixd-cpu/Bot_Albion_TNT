@@ -1,9 +1,7 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
-const supabase = createClient(supabaseUrl, supabaseAnonKey);
+import { getServerSession } from 'next-auth/next';
+import { supabase } from "@/lib/supabaseServer";
+import { authOptions, isAdmin } from "@/lib/auth";
 
 export async function GET() {
   try {
@@ -41,6 +39,20 @@ export async function GET() {
 
 export async function PATCH(request: Request) {
   try {
+    // ── Lớp bảo vệ 2 (middleware là lớp 1) ────────────────────────────
+    // Không tin tưởng mỗi middleware: nếu matcher bị sửa nhầm thì route
+    // vẫn tự chặn được. API này bypass RLS nên phải chắc chắn.
+    const session = await getServerSession(authOptions);
+    if (!session?.user) {
+      return NextResponse.json({ error: "Chưa đăng nhập" }, { status: 401 });
+    }
+    if (!isAdmin((session.user as { id?: string }).id)) {
+      return NextResponse.json(
+        { error: "Không có quyền sửa dữ liệu bot" },
+        { status: 403 }
+      );
+    }
+    // ──────────────────────────────────────────────────────────────────
     const updateData = await request.json();
 
     // Ensure it belongs to default
