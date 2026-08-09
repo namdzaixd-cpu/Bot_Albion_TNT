@@ -68,6 +68,10 @@ sát nghĩa, dịch bằng Gemini:
 "/c/Users/User/AppData/Local/Programs/Python/Python312/python.exe" scripts/translate_albion_v1.py --dry-run
 # dịch thật → lưu map tnc_albion_translations_v1.json (resume: bỏ qua key đã có)
 "/c/Users/User/AppData/Local/Programs/Python/Python312/python.exe" scripts/translate_albion_v1.py
+
+# Dịch LẠI những skill đã có bản dịch nhưng bị thiếu/cụt câu (khi map cũ kém chất lượng):
+"/c/Users/User/AppData/Local/Programs/Python/Python312/python.exe" scripts/translate_albion_v1.py --redo-broken --dry-run
+"/c/Users/User/AppData/Local/Programs/Python/Python312/python.exe" scripts/translate_albion_v1.py --redo-broken
 ```
 
 > **Key Gemini dạng `AQ` (auth key 2026)**: script gọi qua header `x-goog-api-key` (KHÔNG dùng `?key=`),
@@ -77,6 +81,11 @@ sát nghĩa, dịch bằng Gemini:
 > **Quota free mới**: ~20 req/phút (stricter hơn 1.500/ngày); nếu 429 → script tự chờ `Retry-After`; nếu cạn
 > tạm thời, dùng thêm 1 key tài khoản Google khác (append dòng mới phía TRÊN để ưu tiên). Idempotent: chạy lại
 > chỉ dịch phần còn thiếu.
+> **Dịch đầy đủ đa câu**: script yêu cầu Gemini dịch ĐẦY ĐỦ từng câu của `desc_en` (giữ nguyên `\n`, thẻ
+> `[dmg]…[/dmg]` v.v., placeholder số `{0}`/`$$field$$`/`$field$`), format trả về block `##STT` → mô tả nhiều dòng.
+> **`--redo-broken`**: dịch LẠI những skill đã có bản dịch nhưng bị thiếu/cụt câu (heuristic: desc_vi rỗng /
+> thiếu refs so với desc_en / desc_en≥2 dòng mà desc_vi 1 dòng quá ngắn). Sau khi dịch các batch đều được
+> **auto-verify** (đối chiếu ref-set EN vs VI, thiếu thì gọi lại ≤2 vòng).
 
 ## Bước 3c — Merge bản dịch vào blob final
 
