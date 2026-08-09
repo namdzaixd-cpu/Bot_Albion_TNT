@@ -1,7 +1,10 @@
 import { NextResponse } from "next/server";
 import { supabase } from "@/lib/supabaseServer";
 
-const GUILD_ID = process.env.DISCORD_GUILD_ID || process.env.GUILD_ID || "default";
+const GUILD_ID =
+  process.env.DISCORD_GUILD_ID ||
+  process.env.GUILD_ID ||
+  "712258265769050164"; // fallback cố định: guild TNC (tránh 0/0 khi thiếu env)
 
 /**
  * Lấy số thành viên THẬT của guild Discord.
