@@ -40,21 +40,46 @@ dotnet run --project "$env:USERPROFILE\albiondata-bin-dumper\CommandLine" `
 ## Bước 3 — Chạy script build + load Supabase
 
 ```bash
-uv run --with supabase --with python-dotenv python scripts/build_albion_item_db.py
+# Máy local: dùng Python 3.12 (có supabase). Bỏ "--dry-run" khi thực sự ghi lên Supabase.
+"/c/Users/User/AppData/Local/Programs/Python/Python312/python.exe" scripts/build_albion_item_db.py --dry-run
+"/c/Users/User/AppData/Local/Programs/Python/Python312/python.exe" scripts/build_albion_item_db.py
 ```
 
-> `uv` tự tạo venv tạm có `supabase` + `python-dotenv` (máy local không có venv riêng chứa supabase).
-> Không dùng `python` thường (hermes venv thiếu supabase thật).
+> `supabase` đang cài ở **Python 3.12** (`User\AppData\Local\Programs\Python\Python312`), không phải
+> python mặc định (hermes venv). Kiểm tra: `pip show supabase`.
 
-Kỳ vọng log:
+Kỳ vọng log (schema v2 — item nhánh đã resolve reference, có đầy đủ Q/W/passive):
 ```
-localizations: 13745 tags (items + spells)
+localizations: 13745 tags
 spells: 8903
 items: 1897 equipment (skip non-equip 0)
-save_json tnc_albion_item_v1.json OK
-Đã lưu 1897 items (2.20 MB) → tnc_albion_item_v1.json
+MẪU T4_2H_AXE: active=9 passive=4 ref_base=T4_MAIN_AXE | Q: RENDINGSTRIKE, RENDINGSPIN, RENDINGCOMBO
+Đã lưu 1897 items (7.55 MB) → tnc_albion_item_v1.json
 Verify load lại: 1897 items từ Supabase.
 ```
+
+## Bước 3b — Dịch skill/passive sang tiếng Việt (Gemini free)
+
+Blob v2 có tên/desc skill **tiếng Anh** (localization En game không có vi). Để chatbot trả lời tiếng Việt
+sát nghĩa, dịch bằng Gemini:
+
+```bash
+# dry-run đếm pending (không tốn quota)
+"/c/Users/User/AppData/Local/Programs/Python/Python312/python.exe" scripts/translate_albion_v1.py --dry-run
+# dịch thật → lưu map tnc_albion_translations_v1.json (resume: bỏ qua key đã có)
+"/c/Users/User/AppData/Local/Programs/Python/Python312/python.exe" scripts/translate_albion_v1.py
+```
+
+> **Cần `GEMINI_API_KEY` hợp lệ** trong `.env` (key bắt đầu `AIza...`, tạo tại ai.google.dev).
+> Key `AQ.`/OAuth không dùng được cho API này. Nếu hết quota free (~1.500 req/ngày) chạy lại ngày sau
+> (idempotent, chỉ dịch phần còn thiếu).
+
+## Bước 3c — Merge bản dịch vào blob final
+
+```bash
+"/c/Users/User/AppData/Local/Programs/Python/Python312/python.exe" scripts/build_albion_item_db.py --with-translations
+```
+→ blob v2 giờ có `name_vi`/`desc_vi` trong mỗi skill + `name_vi` item. Nếu skill chưa dịch → fallback `_en`.
 
 ## Bước 4 — Verify dữ liệu trên Supabase
 
@@ -86,10 +111,11 @@ git fetch && git push  # kiểm tra remote trước, đừng force
 
 ## Ghi chú
 
-- **Localization VI**: file game không có dữ liệu tiếng Việt → script `name_vi` fallback `name_en`.
-- **Enchant**: biến thể `@1..@3` lưu trong `enchant` với key `tnc_...<base>@N`; key gốc `@0` không
-  ghi riêng (lấy từ base).
-- **Item bị loại**: food/potion/consumable/resource/reagent/tools/trash — chỉ giữ slot
-  `mainhand/offhand/head/armor/shoes/cape/bag`.
+- **Localization VI**: file game không có dữ liệu tiếng Việt. Dịch bằng Gemini (Bước 3b) → merge (3c).
+- **Schema v2**: item nhánh `reference=` đã resolve → thừa hưởng Q/W/passive từ item gốc; `spells.active`
+  (slot 1→Q, 2→W, 3→E, tag) + `spells.passive` (PASSIVE_*) + `ref_base` (root gốc).
+- **Enchant**: biến thể `@1..@3` lưu trong `enchant` key `<base>@N`; `@0` không ghi riêng.
+- **Blob size**: v2 ~7.5MB (full skill). Trigger 1MB `trg_json_storage_size` trong `migration_security.sql`
+  chưa apply ở prod (blob hiện đã vượt 1MB vẫn ghi OK) — đừng re-apply nếu không muốn chặn.
 - Không chạy bot (`python bot/main.py`) ở local — bản production đang chạy trên Render.
 - Thay đổi cách chạy, thay đổi cấu hình — cập nhật task list `02_task.md`.

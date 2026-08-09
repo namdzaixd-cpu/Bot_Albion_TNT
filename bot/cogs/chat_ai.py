@@ -25,6 +25,7 @@ from core.permissions import is_officer
 from core.permissions import is_officer
 from core.storage import load_json, save_json
 from core.database import execute
+from core.data.albion_item import format_item_compact, search_items
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 OLLAMA_URL = "https://ollama.com/api/chat"
@@ -750,6 +751,45 @@ class ChatAI(commands.Cog):
         return (f"DANH SÁCH THÀNH VIÊN MỚI TRONG {days} NGÀY QUA ({len(members)} người):\n"
                 + "\n".join(lines) + more)
 
+    # ── HOOK: câu hỏi về item trang bị Albion → inject dữ liệu item từ DB ──
+    ITEM_KEYWORDS = (
+        "vũ khí", "vũ khi", "giáp", "áo giáp", "mũ", "áo", "giày", "cape", "áo choàng",
+        "skill", "kỹ năng", "ky nang", "passive", "thụ động", "thu dong",
+        "axe", "rìu", "riu", "sword", "kiếm", "kiem", "dao", "gậy", "gay", "staff", "búa", "bua",
+        "cung", "nỏ", "no", "hammer", "mace", "chùy", "chuy", "dáo", "ao", "item", "trang bị",
+        "trang bi", "weapon", "armor", "helm", "helmet", "boot", "cheses", "chest", "thú nhỏ",
+    )
+    ITEM_CONTEXT_MAXCHARS = 2200
+
+    def _detect_item_query(self, content: str) -> list[str] | None:
+        """Trả danh sách uid item nếu tin nhắn có vẻ hỏi về item; None nếu không."""
+        c = (content or "").lower()
+        if not any(kw in c for kw in self.ITEM_KEYWORDS):
+            return None
+        results = search_items(content, 3)
+        return [uid for uid, _ in results] or None
+
+    def _fetch_item_context(self, uids: list[str], max_chars: int = ITEM_CONTEXT_MAXCHARS) -> str:
+        """Build block dữ liệu item (ngắn gọn) cho prompt; "" nếu không có data."""
+        from core.data.albion_item import load_items
+        idx = load_items()
+        if not idx:
+            return ""
+        block = "--- KHO DỮ LIỆU ITEM ALBION (từ DB game offline, chỉ dùng dữ liệu trong đây) ---\n"
+        for uid in uids:
+            it = idx["items"].get(uid)
+            if not it:
+                continue
+            block += format_item_compact(uid, it) + "\n"
+            if len(block) > max_chars:
+                block = block[:max_chars]
+                break
+        block += "--------------------------------------\n\n"
+        block += ("Trả lời bằng tiếng Việt chỉ dựa trên data trên. "
+                  "Nếu người dùng hỏi skill/stats item không có trong đoạn, nói rõ 'không có data'. "
+                  "KHÔNG bịa số liệu, tên skill, cooldown.\n\n")
+        return block
+
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
         # Bỏ qua tin nhắn từ chính bot hoặc các bot khác
@@ -893,6 +933,18 @@ class ChatAI(commands.Cog):
                     )
                 except Exception as e:
                     print(f"[newmembers-hook] Lỗi: {e}")
+
+        # ── HOOK: câu hỏi về item trang bị Albion → inject dữ liệu item ──
+        if not summary_context:
+            item_uids = self._detect_item_query(content)
+            if item_uids:
+                try:
+                    item_context = self._fetch_item_context(item_uids)
+                except Exception as e:
+                    print(f"[item-hook] Lỗi: {e}")
+                    item_context = ""
+                if item_context:
+                    summary_context = item_context
 
         # Tìm URLs và fetch nội dung
         web_context = ""

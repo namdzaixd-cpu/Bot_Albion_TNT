@@ -25,6 +25,7 @@ EXTENSIONS = [
     "cogs.chat_ai",
     "cogs.onboarding",
     "cogs.wiki",
+    "cogs.item_albion",
     "cogs.chat_logger",
     "cogs.sync",
     "cogs.learning",
