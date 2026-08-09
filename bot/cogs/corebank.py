@@ -33,6 +33,11 @@ def get_reaction_key(emoji) -> str:
     """Lấy key nhất quán cho emoji reaction (PartialEmoji)."""
     return str(emoji.id) if emoji.id else emoji.name
 
+def _sorted_emoji_keys(emoji_map: dict) -> list:
+    """Thứ tự emoji react: tăng dần theo (order, value). Dùng cho cả on_message
+    (react bình thường + tách ảnh) — tách ra để test thứ tự dễ kiểm chứng."""
+    return sorted(emoji_map.keys(), key=lambda k: (emoji_map[k].get("order", 0), emoji_map[k]["value"]))
+
 class CoreBankCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot

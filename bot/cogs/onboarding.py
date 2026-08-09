@@ -77,6 +77,18 @@ class OnboardConfig:
         return self.data.get("question_channel_id")
 
 
+def _format_yob(yob: str) -> str:
+    """Format năm sinh cho nickname: 2005→2k5, 2000→2k, 1998→98. Giữ nguyên nếu không phải 4 số."""
+    formatted = yob
+    if formatted.isdigit():
+        if len(formatted) == 4:
+            if formatted.startswith("20"):
+                formatted = f"2k{formatted[3:]}" if formatted[3:] != "0" else "2k"
+            elif formatted.startswith("19"):
+                formatted = formatted[2:]
+    return formatted
+
+
 def get_onboard_data(interaction: discord.Interaction):
     thread = interaction.message.channel
     target_user_id = thread.owner_id
@@ -228,13 +240,7 @@ class OfficerApprovalView(discord.ui.View):
             await interaction.response.send_message("❌ Không tìm thấy user này trong server (có thể họ đã out).", ephemeral=True)
             return
             
-        formatted_yob = yob
-        if formatted_yob.isdigit():
-            if len(formatted_yob) == 4:
-                if formatted_yob.startswith("20"):
-                    formatted_yob = f"2k{formatted_yob[3:]}" if formatted_yob[3:] != "0" else "2k"
-                elif formatted_yob.startswith("19"):
-                    formatted_yob = formatted_yob[2:]
+        formatted_yob = _format_yob(yob)
         
         new_nick = f"[{GUILD_TAG}] {ign_name} {formatted_yob}".strip()
         if len(new_nick) > 32:
