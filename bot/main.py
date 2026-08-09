@@ -10,6 +10,7 @@ from core.config import BOT_SESSION_ID, GUILD_ID, TOKEN
 from core.storage import restore_from_github
 from core.webserver import keep_alive
 from core.system_logger import SystemLogger
+from core.heartbeat import start as start_heartbeat
 
 # ==============================================================================
 # KHỞI TẠO BOT CORE
@@ -49,6 +50,8 @@ class TNCBot(commands.Bot):
         
         # Bật ghi log hệ thống
         SystemLogger.start(self)
+        # Bật heartbeat đập tim lên Supabase (dashboard đọc trạng thái online)
+        start_heartbeat(self)
 
 
 bot = TNCBot()

@@ -10,6 +10,7 @@ import CoreBankDashboard from "./corebank/page";
 import BlacklistDashboard from "./blacklist/page";
 import SiphonedDashboard from "./siphoned/page";
 import OverviewDashboard from "./OverviewDashboard";
+import GuildCheckPanel from "./GuildCheckPanel";
 import CommandPalette from "./CommandPalette";
 import {
   LayoutDashboard, Users, Shield,
@@ -35,6 +36,11 @@ export default function Dashboard() {
 
   // API Data State
   const [isOnboardEnabled, setIsOnboardEnabled] = useState(false);
+  // Công tắc tổng: true khi TẤT CẢ module đang bật
+  const [allEnabled, setAllEnabled] = useState(false);
+  const [toggling, setToggling] = useState(false);
+  const [moduleCount, setModuleCount] = useState({ on: 0, total: 0 });
+  const [modulesVersion, setModulesVersion] = useState(0);
   const [config, setConfig] = useState({
     apply_channel_id: "",
     question_channel_id: "",
@@ -97,17 +103,53 @@ export default function Dashboard() {
     }
   };
 
+  // Đọc trạng thái tổng của tất cả module (cho công tắc ở header)
+  useEffect(() => {
+    let alive = true;
+    const loadModules = async () => {
+      try {
+        const res = await fetch('/api/overview');
+        if (!res.ok || !alive) return;
+        const d = await res.json();
+        const mods: { enabled: boolean }[] = d.modules ?? [];
+        if (!alive) return;
+        const on = mods.filter(m => m.enabled).length;
+        setModuleCount({ on, total: mods.length });
+        setAllEnabled(mods.length > 0 && on === mods.length);
+      } catch { }
+    };
+    loadModules();
+    return () => { alive = false; };
+  }, [modulesVersion]);
+
+
+  /**
+   * Công tắc TỔNG: bật/tắt tất cả module cùng lúc.
+   * Gọi /api/modules — server tự dò mọi cột is_*_enabled trong bảng config.
+   */
   const handleToggle = async () => {
-    const newVal = !isOnboardEnabled;
-    setIsOnboardEnabled(newVal);
+    const newVal = !allEnabled;
+    setAllEnabled(newVal);            // phản hồi tức thì cho mượt
+    setToggling(true);
     try {
-      await fetch('/api/config', {
+      const res = await fetch('/api/modules', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ is_onboard_enabled: newVal })
+        body: JSON.stringify({ enabled: newVal })
       });
+      if (!res.ok) {
+        setAllEnabled(!newVal);       // server từ chối -> trả về trạng thái cũ
+        const e = await res.json().catch(() => ({}));
+        alert(e.error || 'Không đổi được trạng thái module');
+        return;
+      }
+      setIsOnboardEnabled(newVal);
+      setModulesVersion(v => v + 1);  // báo Tổng quan tải lại danh sách
     } catch (err) {
-      console.error("Lỗi toggle config:", err);
+      setAllEnabled(!newVal);
+      console.error("Lỗi toggle module:", err);
+    } finally {
+      setToggling(false);
     }
   };
 
@@ -228,19 +270,28 @@ export default function Dashboard() {
           </div>
 
           <div className="flex items-center gap-4">
-            <span className="text-sm font-semibold text-text-muted">Trạng thái Module:</span>
+            <div className="text-right leading-tight">
+              <span className="text-sm font-semibold text-text-muted block">Trạng thái Module:</span>
+              <span className="text-[11px]" style={{ color: "#8b8499" }}>
+                {moduleCount.total > 0
+                  ? `${moduleCount.on}/${moduleCount.total} module đang bật`
+                  : "Đang tải..."}
+              </span>
+            </div>
             <button
               onClick={handleToggle}
-              className={`relative inline-flex h-8 w-16 items-center rounded-full transition-colors duration-300 focus:outline-none ${isOnboardEnabled ? 'bg-green-500 shadow-[0_0_15px_rgba(34,197,94,0.4)]' : 'bg-surface'
+              disabled={toggling || moduleCount.total === 0}
+              title={allEnabled ? "Tắt tất cả module" : "Bật tất cả module"}
+              className={`relative inline-flex h-8 w-16 items-center rounded-full transition-colors duration-300 focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed ${allEnabled ? 'bg-green-500 shadow-[0_0_15px_rgba(34,197,94,0.4)]' : 'bg-surface'
                 }`}
             >
               <span
-                className={`inline-block h-6 w-6 transform rounded-full bg-white transition-transform duration-300 ${isOnboardEnabled ? 'translate-x-9' : 'translate-x-1'
+                className={`inline-block h-6 w-6 transform rounded-full bg-white transition-transform duration-300 ${allEnabled ? 'translate-x-9' : 'translate-x-1'
                   }`}
               />
             </button>
-            <span className={`text-sm font-bold ${isOnboardEnabled ? 'text-green-400' : 'text-text-muted'}`}>
-              {isOnboardEnabled ? 'Đang Bật' : 'Đã Tắt'}
+            <span className={`text-sm font-bold ${allEnabled ? 'text-green-400' : 'text-text-muted'}`}>
+              {toggling ? 'Đang lưu...' : allEnabled ? 'Bật Tất Cả' : 'Đã Tắt'}
             </span>
           </div>
         </header>
@@ -255,6 +306,8 @@ export default function Dashboard() {
               </div>
               <OverviewDashboard />
             </div>
+          ) : activeModule === 'guildcheck' ? (
+            <GuildCheckPanel />
           ) : activeModule === 'onboarding' ? (
             <div className="max-w-5xl mx-auto space-y-8 animate-fade-in">
 

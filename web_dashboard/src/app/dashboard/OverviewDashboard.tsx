@@ -1,9 +1,30 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { Users, Gem, Ban, Bot, Activity, Command } from "lucide-react";
+import { Users, Activity, ToggleLeft } from "lucide-react";
+import StatusBadge from "./StatusBadge";
 
 type Activity = { time: string; event: string; module: string; status: string };
+type ModuleState = { key: string; id: string; enabled: boolean };
+
+/** Tên tiếng Việt cho từng module; chưa có thì tự chuyển từ id. */
+const MODULE_LABELS: Record<string, string> = {
+  onboard: "Recruiter (Onboarding)",
+  onboarding: "Recruiter (Onboarding)",
+  guildcheck: "GuildCheck System",
+  massing: "Massing / CTA",
+  siphoned: "Siphoned Energy",
+  blacklist: "Blacklist",
+  corebank: "Quản lý Core-Bank",
+  ai: "AI Assistant & TTS",
+  vision: "AI Vision",
+  tts: "Text-to-Speech",
+  logs: "System Logs",
+};
+
+const labelOf = (id: string) =>
+  MODULE_LABELS[id] ??
+  id.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 
 const fmtNum = (n: number) =>
   n >= 1_000_000 ? (n / 1_000_000).toFixed(1) + "M"
@@ -33,7 +54,10 @@ function useCountUp(target: number, dur = 900) {
   return val;
 }
 
-function StatCard({ label, value, sub, icon: Icon, color }: any) {
+function StatCard({ label, value, sub, icon: Icon, color, raw }: {
+  label: string; value: number; sub: string;
+  icon: React.ElementType; color: string; raw?: string | null;
+}) {
   const v = useCountUp(value);
   return (
     <div className="glass relative overflow-hidden rounded-2xl p-5 group hover:-translate-y-1 transition-all duration-300"
@@ -42,7 +66,7 @@ function StatCard({ label, value, sub, icon: Icon, color }: any) {
         <div>
           <span className="text-sm" style={{ color: "#8b8499" }}>{label}</span>
           <div className="count-pop mt-3 text-4xl font-black tabular-nums" style={{ color }}>
-            {fmtNum(v)}
+            {raw ?? fmtNum(v)}
           </div>
           <div className="mt-1 text-xs" style={{ color: "#8b8499" }}>{sub}</div>
         </div>
@@ -56,28 +80,38 @@ function StatCard({ label, value, sub, icon: Icon, color }: any) {
 }
 
 export default function OverviewDashboard() {
-  const [stats, setStats] = useState({ members: 0, corebank_total: 0, blacklist_count: 0, ai_today: 0 });
+  const [stats, setStats] = useState<{
+    members: number | null; members_live: boolean;
+    corebank_total: number; blacklist_count: number; ai_today: number;
+  }>({ members: null, members_live: false, corebank_total: 0, blacklist_count: 0, ai_today: 0 });
+  const [modules, setModules] = useState<ModuleState[]>([]);
   const [activity, setActivity] = useState<Activity[]>([]);
   const [loading, setLoading] = useState(true);
 
+  const load = async () => {
+    try {
+      const res = await fetch("/api/overview");
+      if (res.ok) {
+        const d = await res.json();
+        setStats(d.stats);
+        setModules(d.modules ?? []);
+        setActivity(d.activity);
+      }
+    } catch { }
+  };
+
   useEffect(() => {
     let mounted = true;
-    const load = async () => {
-      try {
-        const res = await fetch("/api/overview");
-        if (res.ok) {
-          const d = await res.json();
-          if (!mounted) return;
-          setStats(d.stats);
-          setActivity(d.activity);
-        }
-      } catch { }
-      finally { if (mounted) setLoading(false); }
+    const run = async () => {
+      await load();
+      if (mounted) setLoading(false);
     };
-    load();
-    const iv = setInterval(load, 15000);
+    run();
+    const iv = setInterval(() => { if (mounted) load(); }, 15000);
     return () => { mounted = false; clearInterval(iv); };
   }, []);
+
+  const onCount = modules.filter((m) => m.enabled).length;
 
   return (
     <div className="space-y-8 animate-fade-in relative z-10">
@@ -95,21 +129,84 @@ export default function OverviewDashboard() {
             <span className="text-xs px-2 py-1 rounded-full border border-[rgba(34,211,238,.4)] text-[#22d3ee]" style={{ boxShadow: "0 0 12px rgba(34,211,238,.25)" }}>v2.1</span>
           </div>
           <p className="mt-2 text-sm max-w-xl" style={{ color: "#8b8499" }}>
-            Guild Assistant đang bảo vệ <span className="neon-cyan font-bold">1,284</span> chiến binh Albion.
-            Mọi module vận hành <span className="neon-rose font-bold">real-time</span>.
+            Guild Assistant đang bảo vệ{" "}
+            <span className="neon-cyan font-bold">
+              {stats.members !== null ? stats.members.toLocaleString("vi-VN") : "—"}
+            </span>{" "}
+            chiến binh Albion. Mọi module vận hành{" "}
+            <span className="neon-rose font-bold">real-time</span>.
           </p>
           <div className="mt-3 flex items-center gap-2 text-xs" style={{ color: "#8b8499" }}>
-            <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse" /> Hệ thống online · Ctrl+K để điều hướng
+            <StatusBadge />
           </div>
         </div>
       </div>
 
-      {/* Stat cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-        <StatCard label="Thành viên" value={stats.members} sub="Tổng thành viên guild" icon={Users} color="#8b9cff" />
-        <StatCard label="Core Bank" value={stats.corebank_total} sub="Tổng silver quản lý" icon={Gem} color="#67e8f9" />
-        <StatCard label="Blacklist" value={stats.blacklist_count} sub="Người bị cấm" icon={Ban} color="#fbbf77" />
-        <StatCard label="AI hôm nay" value={stats.ai_today} sub="Lượt chat AI" icon={Bot} color="#8b9cff" />
+      {/* Thành viên + Module */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <StatCard
+          label="Thành viên"
+          value={stats.members ?? 0}
+          raw={stats.members === null ? "—" : undefined}
+          sub={stats.members_live ? "Số liệu trực tiếp từ Discord" : "Chưa lấy được số liệu"}
+          icon={Users}
+          color="#8b9cff"
+        />
+
+        {/* Ô tổng: danh sách module đang có */}
+        <div className="glass rounded-2xl p-5 lg:col-span-2"
+          style={{ boxShadow: "0 0 0 1px rgba(168,85,247,.12), 0 10px 40px rgba(0,0,0,.4)" }}>
+          <div className="flex items-center justify-between mb-4">
+            <span className="text-sm flex items-center gap-2" style={{ color: "#8b8499" }}>
+              <ToggleLeft className="w-4 h-4" style={{ color: "#a855f7" }} />
+              Module hệ thống
+            </span>
+            <span className="text-xs font-semibold tabular-nums" style={{ color: "#8b8499" }}>
+              <span style={{ color: onCount > 0 ? "#4ade80" : "#8b8499" }}>{onCount}</span>
+              {" / "}{modules.length} đang bật
+            </span>
+          </div>
+
+          {loading ? (
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+              {[1, 2, 3, 4, 5, 6].map((i) => (
+                <div key={i} className="h-10 rounded-xl bg-[rgba(139,156,255,.08)] animate-pulse" />
+              ))}
+            </div>
+          ) : modules.length === 0 ? (
+            <div className="text-center py-6 text-sm" style={{ color: "#8b8499" }}>
+              Chưa có module nào trong cấu hình.
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+              {modules.map((m) => (
+                <div
+                  key={m.key}
+                  className="flex items-center gap-2.5 rounded-xl border px-3 py-2.5 transition-colors"
+                  style={{
+                    borderColor: m.enabled ? "rgba(74,222,128,.28)" : "rgba(168,85,247,.12)",
+                    background: m.enabled ? "rgba(74,222,128,.07)" : "rgba(7,6,15,.4)",
+                  }}
+                  title={m.enabled ? "Đang bật" : "Đã tắt"}
+                >
+                  <span
+                    className={`w-2 h-2 rounded-full shrink-0 ${m.enabled ? "animate-pulse" : ""}`}
+                    style={{
+                      background: m.enabled ? "#4ade80" : "#4b4458",
+                      boxShadow: m.enabled ? "0 0 8px rgba(74,222,128,.7)" : "none",
+                    }}
+                  />
+                  <span
+                    className="text-xs truncate"
+                    style={{ color: m.enabled ? "#dbeafe" : "#8b8499" }}
+                  >
+                    {labelOf(m.id)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Activity */}
