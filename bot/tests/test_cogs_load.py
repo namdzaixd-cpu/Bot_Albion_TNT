@@ -19,6 +19,12 @@ def test_all_cogs_load_without_error():
 
     async def _run():
         bot = bot_main.TNCBot()
+        # discord.py mới không cho truy cập bot.loop trước khi run().
+        # Gán tạm loop cho test (CI chạy ngoài gateway thật).
+        try:
+            bot.loop = asyncio.get_event_loop()
+        except RuntimeError:
+            bot.loop = asyncio.new_event_loop()
 
         # Cô lập khỏi network / event loop
         async def _fake_sync(*a, **k):
