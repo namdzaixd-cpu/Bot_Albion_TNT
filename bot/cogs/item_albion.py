@@ -10,7 +10,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from core.data.albion_item import format_item_full, search_items
+from core.data.albion_item import DISCORD_MSG_LIMIT, format_item_full, search_items
 
 SLOT_HINTS = {
     "mainhand": "vũ khí tay chính", "offhand": "tay phụ", "head": "mũ",
@@ -36,11 +36,17 @@ class ItemAlbionCog(commands.Cog):
             return
 
         uid, item = results[0]
-        msg = format_item_full(uid, item)
+        # Tính hints trước để dành budget cho nội dung item chính
+        hints = ""
         if len(results) > 1:
-            hints = ", ".join(f"`{data.get('name_vi') or data.get('name','')}` ({u})"
-                              for u, data in results[1:])
-            msg += f"\n\n• Còn có thể bạn muốn: {hints}"
+            hints = ("\n\n• Còn có thể bạn muốn: "
+                     + ", ".join(f"`{data.get('name_vi') or data.get('name','')}` ({u})"
+                                 for u, data in results[1:]))
+        msg = format_item_full(uid, item, max_chars=DISCORD_MSG_LIMIT - len(hints))
+        msg += hints
+        # Ép dưới giới hạn Discord (phòng emoji ngoài BMP / cắt thừa)
+        if len(msg) > DISCORD_MSG_LIMIT:
+            msg = msg[:DISCORD_MSG_LIMIT - 3].rstrip("\n") + "\n…"
         await interaction.followup.send(msg)
 
 

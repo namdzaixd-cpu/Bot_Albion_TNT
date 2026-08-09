@@ -777,27 +777,31 @@ class ChatAI(commands.Cog):
         idx = load_items()
         if not idx:
             return ""
-        block = "--- KHO DỮ LIỆU ITEM ALBION (từ DB game offline, chỉ dùng dữ liệu trong đây) ---\n"
-        # Item chính đầu tiên hiển thị ĐẦY ĐỦ (stat + skill kèm mô tả + passive),
-        # các kết quả khác hiển thị gọn (bổ sung ngữ cảnh).
+        header = "--- KHO DỮ LIỆU ITEM ALBION (từ DB game offline, chỉ dùng dữ liệu trong đây) ---\n"
+        footer = ("--------------------------------------\n\n"
+                  "Trả lời bằng tiếng Việt, đầy đủ từ stat đến skill, giải thích thuật ngữ cho người mới. "
+                  "Chỉ dùng dữ liệu trên. "
+                  "Nếu người dùng hỏi skill/stats item không có trong đoạn, nói rõ 'không có data'. "
+                  "KHÔNG bịa số liệu, tên skill, cooldown.\n\n")
+        block = header
+        remaining = max_chars - len(header) - len(footer)
+        # Item chính đầu tiên hiển thị ĐẦY ĐỦ trong budget (stat + skill kèm mô tả + passive),
+        # các kết quả khác hiển thị gọn (bổ sung ngữ cảnh). Không cắt nửa chừng → bỏ hẳn item cuối.
         first = True
         for uid in uids:
             it = idx["items"].get(uid)
             if not it:
                 continue
             if first:
-                block += format_item_full(uid, it, max_desc=500) + "\n"
+                piece = format_item_full(uid, it, max_desc=500, max_chars=remaining) + "\n"
                 first = False
             else:
-                block += format_item_compact(uid, it) + "\n"
-            if len(block) > max_chars:
-                block = block[:max_chars]
+                piece = format_item_compact(uid, it) + "\n"
+            if len(piece) > remaining:
                 break
-        block += "--------------------------------------\n\n"
-        block += ("Trả lời bằng tiếng Việt, đầy đủ từ stat đến skill, giải thích thuật ngữ cho người mới. "
-                  "Chỉ dùng dữ liệu trên. "
-                  "Nếu người dùng hỏi skill/stats item không có trong đoạn, nói rõ 'không có data'. "
-                  "KHÔNG bịa số liệu, tên skill, cooldown.\n\n")
+            block += piece
+            remaining -= len(piece)
+        block += footer
         return block
 
     @commands.Cog.listener()

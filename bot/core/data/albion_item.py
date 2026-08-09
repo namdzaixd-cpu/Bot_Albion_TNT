@@ -113,20 +113,82 @@ def _vi(it, s, key):
     return v or (s or {}).get(f"{key}_en") or ""
 
 
-def format_item_full(uid: str, item: dict, max_desc: int = 1200) -> str:
-    """Render block text tiếng Việt đầy đủ (tên/tier/slot/branch/enchant/skills)."""
-    if not item:
-        return f"⚠ Không có dữ liệu item `{uid}`."
+DISCORD_MSG_LIMIT = 2000   # giới hạn tin nhắn Discord (1 tin nội dung)
+
+
+def _soft_trim(s: str, limit: int) -> str:
+    """Rút gọn chuỗi an toàn: không quá `limit` ký tự, không chẻ giữa dòng/emoji/
+    ký tự tổ hợp (tiếng Việt) / markdown `**`/`*` hở. Trả "" nếu limit <= 0.
+    Cắt lùi về ranh giới dòng → ranh giới từ → né combining/emoji/markdown → thêm "…".
+    """
+    if limit <= 0:
+        return ""
+    if len(s) <= limit:
+        return s
+    cut = limit
+    # 1) mô tả nhiều câu (có \n): cắt ở RANH GIỚI CUỐI CÂU (giữ \n trước đó) để
+    #    không chẻ giữa câu và không làm dấu `*` mở ở đầu dòng bị hở.
+    np = s.rfind("\n", 0, cut)
+    if np > 0:
+        cut = np + 1          # giữ nguyên phần câu trước dấu \n (câu đầy đủ)
+    else:
+        # 2) ranh giới từ / cuối câu
+        for sep in (" ", ". ", ", "):
+            i = s.rfind(sep, 0, cut)
+            if i > 0:
+                cut = i + 1
+                break
+    # 3) không chẻ ký tự tổ hợp (ấ, ế...) — lùi qua combining
+    while cut > 0 and unicodedata.combining(s[cut - 1]):
+        cut -= 1
+    # 4) không chẻ cụm emoji/ZWJ/variation selector
+    while cut > 0 and (unicodedata.category(s[cut - 1]) in ("So", "Mn") or s[cut - 1] == "‍"):
+        cut -= 1
+    # 5) không chẻ markdown ** / * : nếu cắt giữa cặp mở-đóng → lùi về token mở
+    for token in ("**", "*"):
+        opener = s.rfind(token, 0, cut)
+        if opener >= 0:
+            closer = s.find(token, opener + len(token), cut)
+            if closer == -1 or closer + len(token) > cut:
+                cut = opener
+    head = s[:cut].rstrip(" ")
+    return (head + "…") if head else "…"
+
+
+_counters = {"seq": 0}
+
+def _next_idx() -> int:
+    _counters["seq"] += 1
+    return _counters["seq"]
+
+
+class _Atom:
+    """1 đơn vị render: group header hoặc skill (name bắt buộc, desc co giãn)."""
+    __slots__ = ("kind", "letter", "id", "name_line", "desc", "prio")
+
+    def __init__(self, kind: str, letter: str, name_line: str, desc: str = "",
+                 prio: int = 0):
+        self.kind = kind            # "group" | "active" | "passive"
+        self.letter = letter        # "Q"..."R" (group), "" với skill
+        self.id = _next_idx()
+        self.name_line = name_line
+        self.desc = desc
+        self.prio = prio            # ưu tiên mô tả: active trước (1), passive sau (2)
+
+
+def _build_atoms(uid: str, item: dict) -> tuple[list[str], list[_Atom]]:
+    """Tách block render thành: (hdr — các dòng header/stats/enchant, atoms — nhóm skill)."""
+    hdr: list[str] = []
     name = item.get("name_vi") or item.get("name") or uid
     name_en = item.get("name") or ""
-    lines = [f"**{name}**"]
+    hdr.append(f"**{name}**")
     if name_en and name_en != name:
-        lines.append(f"*{name_en}*")
-    lines.append(f"`{uid}`")
+        hdr.append(f"*{name_en}*")
+    hdr.append(f"`{uid}`")
 
     slot = _SLOT_LABELS.get(item.get("slottype", ""), item.get("slottype", ""))
     tier = item.get("tier", "")
-    lines.append(f"🛡️ {slot} | Cấp {tier}" + (f" | Nhánh: {item.get('branch','')}" if item.get("branch") else ""))
+    hdr.append(f"🛡️ {slot} | Cấp {tier}" + (f" | Nhánh: {item.get('branch','')}" if item.get("branch") else ""))
 
     stats = item.get("stats", {}) or {}
     parts = []
@@ -136,9 +198,8 @@ def format_item_full(uid: str, item: dict, max_desc: int = 1200) -> str:
         if stats.get(k):
             parts.append(f"{label} {stats[k]}")
     if parts:
-        lines.append("📊 " + " | ".join(parts))
+        hdr.append("📊 " + " | ".join(parts))
 
-    # Enchant diff
     ench = item.get("enchant", {}) or {}
     if ench:
         ip0 = stats.get("itempower", "")
@@ -152,50 +213,115 @@ def format_item_full(uid: str, item: dict, max_desc: int = 1200) -> str:
             if ip and ip != ip0:
                 ench_strs.append(f"@lv{lvl}: IP {ip}")
         if ench_strs:
-            lines.append("✨ " + " | ".join(ench_strs))
+            hdr.append("✨ " + " | ".join(ench_strs))
+    hdr.append("")
 
     spells = item.get("spells", {}) or {}
-    active = spells.get("active", []) or []
-    passive = spells.get("passive", []) or []
-
-    # Gom theo slot Q/W/E/R
+    atoms: list[_Atom] = []
     grouped: dict[str, list] = {"Q": [], "W": [], "E": [], "R": []}
-    for s in active:
+    for s in spells.get("active", []) or []:
         if s.get("remove"):
             continue
         letter = _SLOT_LETTERS.get(str(s.get("slot", "")), "R")
         grouped.setdefault(letter, []).append(s)
-
-    lines.append("")  # separator
     for letter in ("Q", "W", "E", "R"):
         sl = grouped.get(letter) or []
         if not sl:
             continue
-        lines.append(f"**{letter}**")
+        atoms.append(_Atom("group", letter, f"**{letter}**"))
         for s in sl:
             nm = _vi(item, s, "name")
-            desc = _vi(item, s, "desc")
             tag = f" ({s.get('tag','')})" if s.get("tag") else ""
-            lines.append(f"• {nm}{tag}")
-            if desc:
-                d = desc if len(desc) <= max_desc else desc[:max_desc] + "…"
-                lines.append(f"   *{d}*")
-
-    if passive:
-        lines.append(f"**Passive ({len(passive)})**")
-        for s in passive:
+            atoms.append(_Atom("active", "", f"• {nm}{tag}",
+                               _vi(item, s, "desc"), prio=1))
+    pas = spells.get("passive", []) or []
+    if pas:
+        atoms.append(_Atom("group", "Passive", f"**Passive ({len(pas)})**"))
+        for s in pas:
             nm = _vi(item, s, "name")
-            desc = _vi(item, s, "desc")
-            lines.append(f"• {nm}")
-            if desc:
-                d = desc if len(desc) <= max_desc else desc[:max_desc] + "…"
-                lines.append(f"   *{d}*")
+            atoms.append(_Atom("passive", "", f"• {nm}",
+                               _vi(item, s, "desc"), prio=2))
+    return hdr, atoms
 
-    # Kiểm soát kích thước tin (Discord 2000 chars)
+
+def _render(hdr: list[str], atoms: list[_Atom], alloc: dict[int, int]) -> str:
+    """Render atoms theo phân bổ độ dài mô tả `alloc[id]`. Phân bổ 0 → chỉ tên/header.
+
+    Mô tả nhiều câu được wrap MỖI câu thành 1 dòng `   *...*` riêng → cân bằng markdown,
+    không bao giờ có dòng mang dấu `*` mở hở.
+    """
+    lines = list(hdr)
+    for a in atoms:
+        if a.kind == "group":
+            lines.append(a.name_line)
+        else:
+            lines.append(a.name_line)
+            limit = alloc.get(a.id, 0)
+            if limit and a.desc:
+                d = _soft_trim(a.desc, limit)
+                if d:
+                    for sub in d.split("\n"):
+                        if sub.strip():
+                            lines.append(f"   *{sub.strip()}*")
+    return "\n".join(lines)
+
+
+def _fit_budget(hdr: list[str], atoms: list[_Atom], max_desc: int, max_chars: int) -> str:
+    """Phân bổ budget cho mô tả: Active ưu tiên hơn Passive (per user).
+
+    Tên skill + group header + header item LUÔN đủ. Mô tả cấp theo budget; nếu vẫn vượt,
+    bỏ dần dòng MÔ TẢ từ cuối (passive trước, active sau) — KHÔNG bao giờ đụng tên/header.
+    """
+    floor = _render(hdr, atoms, {})
+    budget = max_chars - len(floor)
+    alloc: dict[int, int] = {}
+    # Active (prio 1) cấp trước, theo thứ tự render (Q→R)
+    for a in atoms:
+        if a.kind != "active" or not a.desc:
+            continue
+        take = min(len(a.desc), max_desc, budget) if budget > 0 else 0
+        alloc[a.id] = take
+        budget -= take
+    # Passive sau (chỉ cấp nếu còn budget)
+    for a in atoms:
+        if a.kind != "passive" or not a.desc:
+            continue
+        take = min(len(a.desc), max_desc, budget) if budget > 0 else 0
+        alloc[a.id] = take
+        budget -= take
+    text = _render(hdr, atoms, alloc)
+    if len(text) <= max_chars:
+        return text
+    # Vượt budget (chênh do wrapper `   *...*` / "…"): bỏ dần DÒNG MÔ TẢ cuối
+    # (passive trước theo thứ tự render) tới khi đủ ngắn. Dòng tên/header giữ nguyên.
+    lines = text.splitlines()
+    while len("\n".join(lines)) > max_chars:
+        desc_idx = [i for i, l in enumerate(lines) if l.startswith("   *")]
+        if not desc_idx:
+            break
+        lines.pop(desc_idx[-1])
     text = "\n".join(lines)
-    if len(text) > 1800:
-        text = text[:1800] + "\n…"
-    return text
+    if len(text) <= max_chars:
+        return text
+    return text[:max_chars - 3].rstrip("\n") + "\n…"
+
+
+def format_item_full(uid: str, item: dict, max_desc: int = 1200, max_chars: int = DISCORD_MSG_LIMIT) -> str:
+    """Render block text tiếng Việt đầy đủ (tên/tier/slot/branch/enchant/skills).
+
+    - `max_desc`: giới hạn trên cho MỖI mô tả skill.
+    - `max_chars`: tổng budget output (Discord 2000 mặc định; chat hook truyền cap prompt).
+    Item ngắn (full <= max_chars) → giữ trọn; item dài → ưu tiên Active trước (per user),
+    Passive ít nhất còn tên. Không bao giờ cắt giữa dòng/markdown/emoji.
+    """
+    if not item:
+        return f"⚠ Không có dữ liệu item `{uid}`."
+    hdr, atoms = _build_atoms(uid, item)
+    full_alloc = {a.id: min(len(a.desc), max_desc) for a in atoms if a.desc}
+    full = _render(hdr, atoms, full_alloc)
+    if len(full) <= max_chars:
+        return full
+    return _fit_budget(hdr, atoms, max_desc, max_chars)
 
 
 def format_item_compact(uid: str, item: dict) -> str:
