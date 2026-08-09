@@ -70,9 +70,13 @@ sát nghĩa, dịch bằng Gemini:
 "/c/Users/User/AppData/Local/Programs/Python/Python312/python.exe" scripts/translate_albion_v1.py
 ```
 
-> **Cần `GEMINI_API_KEY` hợp lệ** trong `.env` (key bắt đầu `AIza...`, tạo tại ai.google.dev).
-> Key `AQ.`/OAuth không dùng được cho API này. Nếu hết quota free (~1.500 req/ngày) chạy lại ngày sau
-> (idempotent, chỉ dịch phần còn thiếu).
+> **Key Gemini dạng `AQ` (auth key 2026)**: script gọi qua header `x-goog-api-key` (KHÔNG dùng `?key=`),
+> model `gemini-3.5-flash` — các model 2.x-flash hết hạn cho user mới.
+> **`.env` có nhiều dòng `GEMINI_API_KEY`**: script ưu tiên dòng ĐẦU TIÊN (key mới nhất do user thêm) —
+> đừng sửa/xóa dòng cũ (theo quy tắc bảo vệ .env).
+> **Quota free mới**: ~20 req/phút (stricter hơn 1.500/ngày); nếu 429 → script tự chờ `Retry-After`; nếu cạn
+> tạm thời, dùng thêm 1 key tài khoản Google khác (append dòng mới phía TRÊN để ưu tiên). Idempotent: chạy lại
+> chỉ dịch phần còn thiếu.
 
 ## Bước 3c — Merge bản dịch vào blob final
 
