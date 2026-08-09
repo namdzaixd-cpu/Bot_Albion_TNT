@@ -951,14 +951,24 @@ class ChatAI(commands.Cog):
         # ── HOOK: câu hỏi về item trang bị Albion → inject dữ liệu item ──
         if not summary_context:
             item_uids = self._detect_item_query(content)
-            if item_uids:
+            if item_uids is not None:  # có từ khoá item trong câu
                 try:
-                    item_context = self._fetch_item_context(item_uids)
+                    item_context = self._fetch_item_context(item_uids) if item_uids else ""
                 except Exception as e:
                     print(f"[item-hook] Lỗi: {e}")
                     item_context = ""
                 if item_context:
                     summary_context = item_context
+                else:
+                    # Có hỏi item nhưng không tìm thấy data → báo rõ, KHÔNG chào vô nghĩa
+                    summary_context = (
+                        "--- YÊU CẦU TRA CỨU ITEM ALBION ---\n"
+                        f"Người dùng hỏi về item: \"{content}\"\n"
+                        "NHƯNG kho dữ liệu item hiện không có (hoặc chưa khớp tên). "
+                        "Hãy trả lời tự nhiên: 'Hiện bot chưa có dữ liệu về item này (hoặc chưa tìm thấy). "
+                        "Bạn thử lệnh /iteminfo <tên item> hoặc kiểm tra chính tả nhé.'\n"
+                        "TUYỆT ĐỐI không bịa stat/skill/cooldown của item.\n"
+                    )
 
         # Tìm URLs và fetch nội dung
         web_context = ""
