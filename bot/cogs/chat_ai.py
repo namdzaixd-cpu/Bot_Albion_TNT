@@ -44,6 +44,13 @@ FAILOVER_CHAIN = [
 FAILOVER_STEP_TIMEOUT = 6  # giây chờ mỗi bước (E5: giảm 10->6, free model thường <3s)
 FAILOVER_FREEZE_SECONDS = 300  # bước vừa lỗi bị "đóng băng" (bỏ qua) trong 5 phút
 
+# ---- Giới hạn bộ nhớ (chống OOM trên Render free ~512MB) ----
+_CONFIG_RELOAD_TTL = 30   # giây: không gọi Supabase/library MỖI tin nhắn — chỉ làm mới khi cần (force) hoặc mỗi 30s
+_SUMMARY_PENDING_TTL = 120  # giây: entry debounce tóm tắt hết hiệu lực sau 2 phút
+_SUMMARY_PENDING_MAX = 256  # chặn `_summary_pending` tăng vô hạn
+LIBRARY_SCAN_MAX_DOCS = 500  # tối đa tài liệu 1 lần `/aimodel library_scan` (chống bung RAM)
+LIBRARY_SCAN_MAX_OCR = 40    # tối đa ảnh OCR 1 lần quét (mỗi ảnh = base64 + gọi API)
+
 
 def _is_public_url(url: str) -> bool:
     """Chặn SSRF: chỉ cho fetch URL http/https trỏ tới IP public (không private/loopback/link-local)."""
@@ -64,6 +71,8 @@ class ChatAI(commands.Cog):
         self.api_key = OPENROUTER_API_KEY
         self.message_buffers = {}
         self._frozen_until = {}  # step_index (trong FAILOVER_CHAIN) -> timestamp hết đóng băng
+        self._summary_pending = {}  # key(channel|since_hours) -> ts debounce — có TTL + cap (chống tăng vô hạn)
+        self._scan_ocr_count = 0  # đếm ảnh OCR trong 1 lần quét thư viện (chống bung RAM)
         self._reload_config()
         
     def get_buffer(self, channel_id_str):
@@ -81,7 +90,13 @@ class ChatAI(commands.Cog):
         except Exception as e:
             print(f"Error saving ai_config: {e}")
 
-    def _reload_config(self):
+    def _reload_config(self, force: bool = True):
+        # Throttle: chặn mỗi tin nhắn đều gọi Supabase/library (ngốn CPU/RAM, gây GC
+        # liên tục trên Render free ~512MB). Các lệnh admin vẫn gọi force=True mặc định.
+        now = time.time()
+        if not force and getattr(self, "_config_loaded_ts", 0.0) + _CONFIG_RELOAD_TTL > now:
+            return
+        self._config_loaded_ts = now
         self.ai_config = {
             "channel_buffers": {}, 
             "intercept_channels": [], 
@@ -307,15 +322,19 @@ class ChatAI(commands.Cog):
             await interaction.response.send_message(f"✅ Đã **THÊM** kênh <#{channel_id}> vào danh sách Thư viện. Dùng `/aimodel library_scan` để quét dữ liệu.", ephemeral=False)
 
     async def _process_msg_for_docs(self, msg: discord.Message, title: str, docs: list):
+        # Chặn bung RAM: ngừng nhận docs / OCR khi đạt trần (mỗi ảnh = base64 + gọi API).
+        if len(docs) >= LIBRARY_SCAN_MAX_DOCS or self._scan_ocr_count >= LIBRARY_SCAN_MAX_OCR:
+            return
         content = msg.content or ""
         for att in msg.attachments:
             if att.content_type and att.content_type.startswith('image/'):
                 b64_img = await self._image_to_base64(att.url)
                 if b64_img:
+                    self._scan_ocr_count += 1
                     ocr_text = await self._extract_text_from_image(b64_img, att.content_type)
                     if ocr_text:
                         content += f"\n[Dữ liệu từ ảnh đính kèm: {ocr_text}]"
-                        
+
         if content.strip():
             docs.append({
                 "title": title,
@@ -341,7 +360,8 @@ class ChatAI(commands.Cog):
             
         await interaction.response.defer(ephemeral=False)
         docs = []
-        
+        self._scan_ocr_count = 0
+
         for lib_id in library_ids:
             channel = self.bot.get_channel(int(lib_id))
             if channel is None:
@@ -376,7 +396,9 @@ class ChatAI(commands.Cog):
                 
         self.library_data = docs
         save_json(self.library_data, self.library_file)
-        await interaction.followup.send(f"✅ Quét hoàn tất **{len(library_ids)}** kênh! Đã lưu tổng cộng **{len(docs)}** đoạn dữ liệu vào sổ tay của bot.")
+        cap_hit = len(docs) >= LIBRARY_SCAN_MAX_DOCS or self._scan_ocr_count >= LIBRARY_SCAN_MAX_OCR
+        note = f" (⚠️ đã đạt trần bảo vệ bộ nhớ: {len(docs)} docs, {self._scan_ocr_count} ảnh OCR)" if cap_hit else ""
+        await interaction.followup.send(f"✅ Quét hoàn tất **{len(library_ids)}** kênh! Đã lưu tổng cộng **{len(docs)}** đoạn dữ liệu vào sổ tay của bot.{note}")
 
     @ailibrary_group.command(name="clear", description="Xóa trắng dữ liệu Thư viện Nội bộ")
     async def aimodel_library_clear(self, interaction: discord.Interaction):
@@ -711,9 +733,19 @@ class ChatAI(commands.Cog):
             print(f"[summary-cache] Lỗi lưu cache: {e}")
 
     def _should_debounce(self, key: str) -> bool:
-        """D3: nếu trong 8s có yêu cầu cùng key -> debounce (trả cache/đợi)."""
+        """D3: nếu trong 8s có yêu cầu cùng key -> debounce (trả cache/đợi).
+
+        Giới hạn bộ nhớ: khi dict vượt _SUMMARY_PENDING_MAX thì dọn các entry cũ hơn
+        _SUMMARY_PENDING_TTL — chặn `_summary_pending` phình vô hạn theo số kênh/tổ hợp
+        duration (thủ phạm nhỏ nhưng tích tụ lâu ngày trên Render).
+        """
         import time as _t
         now = _t.time()
+        if len(self._summary_pending) > _SUMMARY_PENDING_MAX:
+            stale = [k for k, ts in self._summary_pending.items()
+                     if now - ts > _SUMMARY_PENDING_TTL]
+            for k in stale:
+                self._summary_pending.pop(k, None)
         last = self._summary_pending.get(key, 0)
         self._summary_pending[key] = now
         return (now - last) < 8
@@ -867,7 +899,7 @@ class ChatAI(commands.Cog):
             
         is_random_intercept = False
         channel_id_str = str(message.channel.id)
-        self._reload_config() # Reload early for intercept_channels
+        self._reload_config(force=False)  # throttle: reload cấu hình tối đa mỗi 30s (chống GC/RAM trên Render)
         
         if not (is_mentioned or is_reply or is_keyword_trigger):
             if channel_id_str in self.ai_config.get("intercept_channels", []):
