@@ -15,7 +15,7 @@ MASSING_FILE = os.path.join(STORAGE_DIR, "tnc_massing_v1.json")
 TEMPLATES_FILE = os.path.join(STORAGE_DIR, "tnc_templates_v1.json")
 
 active_parties = {}
-role_icons = {"Tank": "🛡️", "Heal": "💚", "SP": "💜", "DPS": "⚔️", "Caller": "👑"}
+role_icons = {"Tank": "🛡️", "Heal": "💚", "SP": "💜", "DPS": "⚔️"}
 
 
 def load_massing():
@@ -91,9 +91,7 @@ def build_party_embed(party):
     is_full = total_slots > 0 and total_filled >= total_slots
 
     embed = discord.Embed(title=party["name"], color=0xe74c3c)
-    embed.add_field(name="👑 Caller", value=party["caller"] or "_Chưa có_", inline=True)
-    embed.add_field(name="🕐 Time", value=party["time"] or "_Chưa rõ_", inline=True)
-    embed.add_field(name="​", value="​", inline=True)
+    embed.add_field(name="🕐 Time", value=party["time"] or "_Chưa rõ_", inline=False)
     embed.add_field(name="​", value="─────────────────", inline=False)
 
     for role in party["roles"]:
@@ -121,6 +119,10 @@ def build_party_embed(party):
 
     if party.get("note"):
         embed.add_field(name="📝 Ghi chú", value=party["note"], inline=False)
+
+    creator_name = party.get("creator_name") or (f"<@{party['creator']}>" if party.get("creator") else None)
+    if creator_name:
+        embed.set_footer(text=f"Created by {creator_name}")
 
     return embed
 
@@ -469,8 +471,7 @@ class PartyView(discord.ui.View):
         roles_text = format_role_block(party["roles"], party["weapon_slots"])
         modal = MassingModal(
             prefill_roles=roles_text,
-            prefill_note=party.get("note", ""),
-            prefill_caller=party.get("caller", "")
+            prefill_note=party.get("note", "")
         )
         await interaction.response.send_modal(modal)
 
@@ -503,7 +504,6 @@ class PartyView(discord.ui.View):
 class MassingModal(discord.ui.Modal, title="⚔️ Tạo Massing"):
     party_name = discord.ui.TextInput(label="Tên Party", placeholder="Ví dụ: PVP: SMC, Bom Squad, RZ Brawl Clap...", max_length=80)
     party_time = discord.ui.TextInput(label="Thời gian (có thể để trống)", placeholder="Ví dụ: 5/6 20:00", required=False, max_length=30)
-    party_caller = discord.ui.TextInput(label="Caller (có thể để trống)", placeholder="Tên Caller hoặc để trống...", required=False, max_length=50)
     party_roles = discord.ui.TextInput(
         label="Role (mỗi role 1 dòng, có thể để trống)",
         placeholder="DPS:Realm:2,Iron:1\nHeal:Hallow:1,Redemption:1\nTank:2\nSP:1",
@@ -515,17 +515,14 @@ class MassingModal(discord.ui.Modal, title="⚔️ Tạo Massing"):
         style=discord.TextStyle.paragraph, required=False, max_length=300
     )
 
-    def __init__(self, prefill_roles=None, prefill_note=None, prefill_caller=None):
+    def __init__(self, prefill_roles=None, prefill_note=None):
         super().__init__()
         if prefill_roles:
             self.party_roles.default = prefill_roles
         if prefill_note:
             self.party_note.default = prefill_note
-        if prefill_caller:
-            self.party_caller.default = prefill_caller
 
     async def on_submit(self, interaction: discord.Interaction):
-        caller = self.party_caller.value.strip() if self.party_caller.value else ""
         time_str = self.party_time.value.strip() if self.party_time.value else ""
         note = self.party_note.value.strip() if self.party_note.value else ""
         roles, weapon_slots = parse_role_block(self.party_roles.value or "")
@@ -533,11 +530,12 @@ class MassingModal(discord.ui.Modal, title="⚔️ Tạo Massing"):
         party_data = {
             "id": party_id,
             "name": self.party_name.value.strip(),
-            "caller": caller, "time": time_str,
+            "time": time_str,
             "roles": roles, "weapon_slots": weapon_slots,
             "slots": {r: {} for r in roles},
             "fills": [], "note": note,
-            "creator": interaction.user.id
+            "creator": interaction.user.id,
+            "creator_name": interaction.user.display_name
         }
         active_parties[party_id] = party_data
         view = PartyView(party_id)
