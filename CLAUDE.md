@@ -91,7 +91,13 @@ còn là nơi lưu dữ liệu vận hành thật.
 - Sửa/xóa dữ liệu trực tiếp trên bảng `json_storage` qua console Supabase để "test nhanh" — mọi thay đổi phải qua code.
 - Đặt file tạm, file test, file log vào `bot/Storage/` — thư mục này không còn được sync nên dữ liệu đặt vào sẽ thất lạc.
 
-### ✅ Quy tắc khi thêm dữ liệu mới:
+### ✅ Tạo bảng/cột tự động (DDL qua script)
+Khi cần thêm bảng hoặc cột mới, Agent KHÔNG cần mở SQL Editor thủ công. Dùng script:
+`node scripts/db-exec.js "SQL_DDL_ở_đây"` (ví dụ: `ALTER TABLE x ADD COLUMN y text;`).
+Script dùng `DATABASE_URL` từ `.env` (đã có sẵn, chứa mật khẩu DB) qua package `pg`.
+- Yêu cầu: `npm install pg` (đã cài tạm khi test; nếu thiếu chạy `npm install pg --no-save`).
+- Mọi thay đổi schema (tên bảng, cột, kiểu) vẫn phải mô tả vào file docs của tính năng theo quy tắc trên.
+- KHÔNG dùng anon/service_role key qua REST để tạo cột (REST không hỗ trợ DDL) — luôn qua script này hoặc SQL Editor.
 
 1. Mọi đọc/ghi dữ liệu phải qua `load_json()` / `save_json()` — không dùng `open()` thuần.
 2. Nếu cần thêm **bảng mới trên Supabase**: mô tả schema bảng (tên bảng, cột, kiểu, khóa chính) vào file docs của tính năng, và KHÔNG đụng bảng `json_storage` ngoài qua `storage.py`.
