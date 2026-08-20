@@ -81,6 +81,7 @@ trường Production / Preview / Development):
 | `NEXTAUTH_URL` | `https://<ten-project>.vercel.app` | **KHÔNG để localhost**, sai là login lỗi |
 | `ADMIN_DISCORD_IDS` | `1064162008771084318` | **BẮT BUỘC** — ai được sửa data. Nhiều người ngăn bằng dấu phẩy |
 | `BOT_WEBHOOK_URL` | `https://<bot-tren-render>.onrender.com/api/webhook/reload` | không phải 127.0.0.1 |
+| `CHATBOT_WEBHOOK_URL` | `https://<chatbot-tren-render>.onrender.com/api/webhook/reload` | bot AI riêng |
 | `NEXT_PUBLIC_API_URL` | `https://<ten-project>.vercel.app` | |
 
 Bấm **Deploy**. Build xong Vercel cấp domain -> quay lại bước 1.3 thêm

@@ -57,20 +57,10 @@ FEATURE_FIELDS = [
         "`/corelist` (xem danh sách core)",
     ),
     (
-        "🧠 Quản lý AI",
-        "Bot tự động xoay vòng qua Ollama/Gemini/OpenRouter khi 1 bên lỗi, không cần đổi model thủ công\n"
-        "`/aimodel balance` (xem số dư Credit)\n"
-        "`/aichat buffer` (chỉnh bộ nhớ đệm — Officer)\n"
-        "`/aichat intercept` (bật/tắt nói leo — Officer)\n"
-        "`/aichat vision` (bật/tắt đọc ảnh — Officer)\n"
-        "`/ailibrary set_channel` (đặt kênh thư viện — Officer)\n"
-        "`/ailibrary scan` (quét thư viện RAG — Officer)\n"
-        "`/ailibrary clear` (xóa thư viện RAG — Officer)\n"
-        "`/wiki` (tra cứu Wiki Albion thủ công)\n"
-        "`/iteminfo` (tra cứu chi tiết item trang bị Albion: stat/skill/passive — tiếng Việt)\n"
-        "⚔️ **Hỏi item tự động:** hỏi về vũ khí/giáp/skill (vd 'skill của rìu lớn?') — bot tự chèn dữ liệu item từ database game vào câu trả lời\n"
-        "💡 **Tóm tắt kênh:** gõ 'tóm tắt kênh <tên/kênh mention> từ <tối hôm qua/hôm nay/tuần này>' — bot tự động lấy lịch sử từ Supabase (không cần quyền đọc kênh)\n"
-        "⚡ **Tối ưu:** cache tóm tắt 10p, debounce 8s, tiền xử lý giảm ~60% token, ưu tiên model 128k cho tóm tắt dài, timeout failover 6s — phản hồi nhanh, 0đ",
+        "🧠 AI Chatbot",
+        "🤖 Bot AI chạy trên **bot riêng** — tag bot AI trong kênh để chat\n"
+        "Xoay vòng Ollama/Gemini/OpenRouter, hỗ trợ vision, tóm tắt kênh, RAG library\n"
+        "⚡ Failover 8 step, cache tóm tắt 10p, timeout 6s — phản hồi nhanh, 0đ",
     ),
     (
         "👋 Onboarding",

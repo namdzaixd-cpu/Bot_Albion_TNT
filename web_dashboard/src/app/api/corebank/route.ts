@@ -58,17 +58,18 @@ export async function PATCH(req: Request) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
     
-    // Gửi webhook để Bot reload config (nếu có webhook)
-    const webhookUrl = process.env.BOT_WEBHOOK_URL;
-    if (webhookUrl) {
-      try {
-        await fetch(webhookUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: "config_reload" })
-        });
-      } catch (e) {
-        console.error("Lỗi gọi webhook tới bot:", e);
+    // Gửi webhook để cả 2 Bot reload config
+    for (const webhookUrl of [process.env.BOT_WEBHOOK_URL, process.env.CHATBOT_WEBHOOK_URL]) {
+      if (webhookUrl) {
+        try {
+          fetch(webhookUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: "config_reload" }),
+          }).catch(e => console.error("Lỗi gọi webhook:", e));
+        } catch (e) {
+          console.error("Lỗi gọi webhook:", e);
+        }
       }
     }
 

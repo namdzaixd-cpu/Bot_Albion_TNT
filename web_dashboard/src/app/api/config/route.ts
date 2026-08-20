@@ -69,15 +69,17 @@ export async function PATCH(request: Request) {
 
     if (error) throw error;
 
-    // Trigger webhook để bot discord load lại config
-    if (process.env.BOT_WEBHOOK_URL) {
-      try {
-        fetch(process.env.BOT_WEBHOOK_URL, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-        }).catch(e => console.error("Không thể trigger webhook:", e));
-      } catch (e) {
-        console.error("Lỗi khi gửi webhook:", e);
+    // Trigger webhook để cả 2 bot discord load lại config
+    for (const url of [process.env.BOT_WEBHOOK_URL, process.env.CHATBOT_WEBHOOK_URL]) {
+      if (url) {
+        try {
+          fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+          }).catch(e => console.error("Không thể trigger webhook:", e));
+        } catch (e) {
+          console.error("Lỗi khi gửi webhook:", e);
+        }
       }
     }
 

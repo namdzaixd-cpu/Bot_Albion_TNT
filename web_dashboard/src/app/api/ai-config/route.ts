@@ -69,21 +69,18 @@ export async function PATCH(request: Request) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    // Trigger webhook to the bot to reload config
-    const webhookUrl = process.env.BOT_WEBHOOK_URL;
-    if (webhookUrl) {
-      try {
-        await fetch(webhookUrl, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({ event: 'config_reload' })
-        });
-        console.log('Webhook triggered for AI config reload');
-      } catch (webhookError) {
-        console.error('Failed to trigger webhook:', webhookError);
-        // We don't fail the request if webhook fails, just log it
+    // Trigger webhook to cả 2 bot to reload config
+    for (const webhookUrl of [process.env.BOT_WEBHOOK_URL, process.env.CHATBOT_WEBHOOK_URL]) {
+      if (webhookUrl) {
+        try {
+          fetch(webhookUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ event: 'config_reload' }),
+          }).catch(e => console.error('Failed to trigger webhook:', e));
+        } catch (e) {
+          console.error('Failed to trigger webhook:', e);
+        }
       }
     }
 

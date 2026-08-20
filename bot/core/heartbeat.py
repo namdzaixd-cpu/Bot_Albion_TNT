@@ -15,8 +15,9 @@ from core.storage import save_json
 
 logger = logging.getLogger("bot.heartbeat")
 
+STATUS_KEY = os.getenv("HEARTBEAT_STATUS_KEY", "tnc_bot_status.json")
 STATUS_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                           "Storage", "tnc_bot_status.json")
+                           "Storage", STATUS_KEY)
 
 HEARTBEAT_INTERVAL = 60  # giây
 

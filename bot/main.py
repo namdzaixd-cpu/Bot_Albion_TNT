@@ -23,13 +23,8 @@ EXTENSIONS = [
     "cogs.guildcheck",
     "cogs.alo_tts",
     "cogs.corebank",
-    "cogs.chat_ai",
     "cogs.onboarding",
-    "cogs.wiki",
-    "cogs.item_albion",
-    "cogs.chat_logger",
     "cogs.sync",
-    "cogs.learning",
 ]
 
 
