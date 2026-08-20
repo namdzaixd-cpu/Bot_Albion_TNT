@@ -73,9 +73,9 @@ Sau khi đã "chốt", áp dụng 4 nguyên tắc này khi code:
   test suite trong `bot/tests/`) — không chạy chính bot.
 - Cấu trúc bot: `bot/main.py` (entry point) + `bot/core/` (hạ tầng dùng chung: config, storage,
   permissions, webserver, database) + `bot/cogs/` (mỗi hệ thống tính năng — about, alo_tts, blacklist,
-  chat_ai, corebank, guildcheck, lastseen, massing, onboarding, siphoned, wiki — là 1 cog riêng).
+  corebank, guildcheck, lastseen, massing, onboarding, siphoned, sync — là 1 cog riêng).
   Sửa 1 tính năng thì chỉ đụng cog tương ứng.
-- Cấu hình AI Chat: Chỉ dẫn tính cách, prompt hệ thống nằm tại file [bot/core/templates/chat_ai_instruction.txt](bot/core/templates/chat_ai_instruction.txt). Chỉnh sửa file này thay vì sửa trực tiếp code Python trong cog.
+- **Lưu ý:** Tính năng AI Chat (chat_ai, chat_logger, learning, item_albion, wiki) đã được tách sang repo riêng [TNC-Chatbot](https://github.com/kudominer/TNC-Chatbot) và deploy trên Render tài khoản riêng.
 
 ## Lưu trữ dữ liệu — QUY TẮC BẮT BUỘC (Supabase)
 
