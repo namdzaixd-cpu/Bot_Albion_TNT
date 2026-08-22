@@ -109,7 +109,7 @@ EXPECTED_COMMANDS = {
 }
 
 EXPECTED_LINKS = {
-    "github": "https://github.com/namdzaixd-cpu/Bot_Albion_TNC",
+    "github": "https://github.com/namdzaixd-cpu/Bot_Albion_TNT",
     "discord": "https://discord.gg/PhMqCskBJ",
     "chatbot": "https://github.com/kudominer/TNC-Chatbot",
     "albion": "https://albiononline.com",
@@ -217,7 +217,7 @@ Tạo đúng 34 row/card command. Mỗi row có `data-command="/tên lệnh"`, `
 Tạo đúng bốn link được test:
 
 ```html
-<a data-link="github" href="https://github.com/namdzaixd-cpu/Bot_Albion_TNC">GitHub</a>
+<a data-link="github" href="https://github.com/namdzaixd-cpu/Bot_Albion_TNT">GitHub</a>
 <a data-link="discord" href="https://discord.gg/PhMqCskBJ">Discord TNC</a>
 <a data-link="chatbot" href="https://github.com/kudominer/TNC-Chatbot">TNC-Chatbot</a>
 <a data-link="albion" href="https://albiononline.com">Albion Online</a>
