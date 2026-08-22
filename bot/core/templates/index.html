@@ -3,767 +3,1391 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>TNC Guild Manager - Albion Online Discord Bot</title>
+    <meta name="description" content="TNC Guild Operations — hệ thống Discord Bot quản trị guild The Northern Constellations trong Albion Online.">
+    <meta name="theme-color" content="#101621">
+    <title>TNC Guild Operations — Albion Online Discord Bot</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Cinzel:wght@600;700;900&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
     <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-
         :root {
-            --bg-deep: #0a0a0f;
-            --bg-dark: #0e0e16;
-            --bg-card: rgba(255,255,255,0.03);
-            --gold: #f1c40f;
-            --gold-dim: rgba(241,196,15,0.25);
-            --crimson: #e74c3c;
-            --crimson-dim: rgba(231,76,60,0.25);
-            --text: #f4f4f5;
-            --text-muted: #8a8a96;
-            --font-display: 'Cinzel', serif;
-            --font-body: 'Outfit', sans-serif;
+            --steel-950: #101621;
+            --steel-850: #172334;
+            --parchment: #e8e0cf;
+            --brass: #d2a84a;
+            --map-cyan: #70b7c8;
+            --battle-red: #b85745;
+            --muted: #9da9b5;
+            --line: rgba(112, 183, 200, 0.22);
+            --display: "Barlow Condensed", "Arial Narrow", sans-serif;
+            --body: "IBM Plex Sans", system-ui, sans-serif;
+            --mono: "IBM Plex Mono", ui-monospace, monospace;
         }
 
-        html { scroll-behavior: smooth; }
+        * {
+            box-sizing: border-box;
+        }
+
+        html {
+            scroll-behavior: smooth;
+        }
 
         body {
-            background: var(--bg-deep);
-            color: var(--text);
-            font-family: var(--font-body);
-            line-height: 1.6;
-            overflow-x: hidden;
+            margin: 0;
+            color: var(--parchment);
+            background: var(--steel-950);
+            font-family: var(--body);
+            line-height: 1.65;
         }
 
-        /* ───────── PARTICLES ───────── */
-        #particles {
+        a {
+            color: inherit;
+        }
+
+        :focus-visible {
+            outline: 3px solid var(--map-cyan);
+            outline-offset: 4px;
+        }
+
+        [hidden] {
+            display: none !important;
+        }
+
+        .skip-link {
             position: fixed;
-            inset: 0;
-            z-index: 0;
-            pointer-events: none;
-            overflow: hidden;
-        }
-        .particle {
-            position: absolute;
-            width: var(--size);
-            height: var(--size);
-            background: var(--color);
-            border-radius: 50%;
-            opacity: 0;
-            animation: float-particle var(--duration) ease-in-out var(--delay) infinite;
-        }
-        @keyframes float-particle {
-            0%   { transform: translateY(100vh) scale(0); opacity: 0; }
-            20%  { opacity: var(--max-opacity); }
-            80%  { opacity: var(--max-opacity); }
-            100% { transform: translateY(-10vh) scale(1); opacity: 0; }
+            top: 1rem;
+            left: 1rem;
+            z-index: 100;
+            padding: 0.75rem 1rem;
+            color: var(--steel-950);
+            background: var(--map-cyan);
+            transform: translateY(-200%);
         }
 
-        /* ───────── HERO ───────── */
-        .hero {
-            position: relative;
-            z-index: 1;
-            min-height: 100vh;
+        .skip-link:focus {
+            transform: translateY(0);
+        }
+
+        .site-header {
+            position: sticky;
+            top: 0;
+            z-index: 50;
+            border-bottom: 1px solid var(--line);
+            background: rgba(16, 22, 33, 0.94);
+        }
+
+        .site-nav,
+        .section-shell {
+            width: min(1180px, calc(100% - 2rem));
+            margin-inline: auto;
+        }
+
+        .site-nav {
             display: flex;
-            flex-direction: column;
             align-items: center;
-            justify-content: center;
-            text-align: center;
-            padding: 2rem 1.5rem;
-            background:
-                radial-gradient(ellipse 80% 60% at 50% 30%, rgba(231,76,60,0.08) 0%, transparent 70%),
-                radial-gradient(ellipse 60% 50% at 80% 80%, rgba(241,196,15,0.05) 0%, transparent 60%),
-                radial-gradient(ellipse 50% 40% at 20% 80%, rgba(231,76,60,0.04) 0%, transparent 50%);
+            justify-content: space-between;
+            gap: 1rem;
+            min-height: 4.5rem;
         }
 
-        .hero-glow {
-            position: absolute;
-            width: 400px;
-            height: 400px;
-            border-radius: 50%;
-            background: radial-gradient(circle, rgba(241,196,15,0.06) 0%, transparent 70%);
-            top: 10%;
-            left: 50%;
-            transform: translateX(-50%);
-            filter: blur(60px);
-            animation: glow-pulse 4s ease-in-out infinite;
-        }
-        @keyframes glow-pulse {
-            0%, 100% { opacity: 0.6; transform: translateX(-50%) scale(1); }
-            50%      { opacity: 1;   transform: translateX(-50%) scale(1.15); }
+        .brand,
+        .nav-links,
+        .hero-actions,
+        .footer-links {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
         }
 
-        .shield {
-            font-size: 5rem;
-            background: linear-gradient(135deg, var(--gold), var(--crimson));
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            filter: drop-shadow(0 0 30px rgba(241,196,15,0.3));
-            animation: shield-float 5s ease-in-out infinite, shield-rotate 10s linear infinite;
-            margin-bottom: 0.5rem;
-            position: relative;
-        }
-        @keyframes shield-float {
-            0%, 100% { transform: translateY(0); }
-            50%      { transform: translateY(-12px); }
-        }
-        @keyframes shield-rotate {
-            0%   { transform: rotateY(0deg); }
-            100% { transform: rotateY(360deg); }
+        .brand,
+        .nav-links a,
+        .button,
+        .footer-links a {
+            text-decoration: none;
         }
 
-        .hero h1 {
-            font-family: var(--font-display);
-            font-size: clamp(2.2rem, 6vw, 4.2rem);
-            font-weight: 900;
-            letter-spacing: 4px;
-            background: linear-gradient(135deg, #fff 0%, var(--gold) 40%, #fff 70%, var(--gold) 100%);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            filter: drop-shadow(0 0 30px rgba(241,196,15,0.25));
+        .brand-mark {
+            display: grid;
+            width: 2.25rem;
+            height: 2.25rem;
+            place-items: center;
+            color: var(--steel-950);
+            background: var(--brass);
+            font-family: var(--display);
+            font-weight: 800;
+        }
+
+        .brand-copy {
+            font-family: var(--display);
+            font-size: 1.15rem;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+
+        .nav-links {
+            flex-wrap: wrap;
+            justify-content: flex-end;
+            color: var(--muted);
+            font-size: 0.85rem;
+        }
+
+        .nav-links a:hover {
+            color: var(--parchment);
+        }
+
+        section {
+            padding: 5.5rem 0;
+            border-bottom: 1px solid rgba(112, 183, 200, 0.12);
+        }
+
+        h1,
+        h2,
+        h3,
+        p {
+            margin-top: 0;
+        }
+
+        h1,
+        h2,
+        h3 {
+            font-family: var(--display);
+            line-height: 1.05;
+        }
+
+        h1 {
+            max-width: 13ch;
+            margin-bottom: 1.5rem;
+            font-size: clamp(3.6rem, 9vw, 7.5rem);
+            letter-spacing: -0.035em;
+            text-transform: uppercase;
+        }
+
+        h2 {
+            max-width: 18ch;
             margin-bottom: 1rem;
-            line-height: 1.2;
+            font-size: clamp(2.6rem, 6vw, 4.5rem);
+            letter-spacing: -0.02em;
+            text-transform: uppercase;
         }
 
-        .hero-sub {
-            font-size: clamp(1rem, 2vw, 1.25rem);
-            color: var(--text-muted);
-            font-weight: 300;
-            max-width: 580px;
-            margin: 0 auto 2rem;
-            letter-spacing: 0.3px;
+        h3 {
+            margin-bottom: 0.6rem;
+            font-size: 1.45rem;
+        }
+
+        .eyebrow {
+            margin-bottom: 0.75rem;
+            color: var(--map-cyan);
+            font-family: var(--mono);
+            font-size: 0.75rem;
+            letter-spacing: 0.16em;
+            text-transform: uppercase;
+        }
+
+        .section-intro {
+            max-width: 66ch;
+            margin-bottom: 2.5rem;
+            color: var(--muted);
+        }
+
+        .hero {
+            min-height: calc(100vh - 4.5rem);
+            display: grid;
+            align-items: center;
+        }
+
+        .hero-layout {
+            display: grid;
+            grid-template-columns: minmax(0, 1.2fr) minmax(20rem, 0.8fr);
+            gap: clamp(2rem, 6vw, 6rem);
+            align-items: center;
+        }
+
+        .hero-lead {
+            max-width: 62ch;
+            color: var(--muted);
+            font-size: 1.08rem;
+        }
+
+        .service-status {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.65rem;
+            margin-bottom: 1.5rem;
+            padding: 0.55rem 0.75rem;
+            border: 1px solid var(--line);
+            color: var(--map-cyan);
+            background: rgba(112, 183, 200, 0.06);
+            font-family: var(--mono);
+            font-size: 0.72rem;
+        }
+
+        .status-dot {
+            width: 0.55rem;
+            height: 0.55rem;
+            border-radius: 50%;
+            background: var(--map-cyan);
         }
 
         .hero-actions {
-            display: flex;
             flex-wrap: wrap;
+            margin-top: 2rem;
+        }
+
+        .button {
+            display: inline-flex;
             align-items: center;
             justify-content: center;
-            gap: 1rem;
-            margin-bottom: 2.5rem;
-        }
-
-        .btn-primary {
-            display: inline-flex;
-            align-items: center;
-            gap: 0.6rem;
-            padding: 0.9rem 2.2rem;
-            border-radius: 50px;
-            font-family: var(--font-body);
-            font-size: 1.05rem;
-            font-weight: 700;
-            color: #0a0a0f;
-            background: linear-gradient(135deg, var(--gold), #f39c12);
-            border: none;
-            text-decoration: none;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            box-shadow: 0 4px 25px rgba(241,196,15,0.25);
-        }
-        .btn-primary:hover {
-            transform: translateY(-3px);
-            box-shadow: 0 8px 35px rgba(241,196,15,0.4);
-        }
-        .btn-primary i { font-size: 1.1rem; }
-
-        .status-badge {
-            display: inline-flex;
-            align-items: center;
-            gap: 0.5rem;
-            padding: 0.55rem 1.3rem;
-            border-radius: 50px;
-            font-size: 0.85rem;
+            min-height: 3rem;
+            padding: 0.75rem 1rem;
+            border: 1px solid var(--brass);
+            font-family: var(--mono);
+            font-size: 0.78rem;
             font-weight: 600;
-            color: #2ecc71;
-            background: rgba(46,204,113,0.08);
-            border: 1px solid rgba(46,204,113,0.25);
-            backdrop-filter: blur(8px);
-        }
-        .status-dot {
-            width: 9px; height: 9px;
-            border-radius: 50%;
-            background: #2ecc71;
-            box-shadow: 0 0 12px #2ecc71;
-            animation: dot-pulse 1.8s infinite;
-        }
-        @keyframes dot-pulse {
-            0%, 100% { transform: scale(0.9); opacity: 0.7; box-shadow: 0 0 0 0 rgba(46,204,113,0.6); }
-            50%      { transform: scale(1.1); opacity: 1;   box-shadow: 0 0 0 8px rgba(46,204,113,0); }
-        }
-        .session-id {
-            margin-left: 6px;
-            padding-left: 6px;
-            border-left: 1px solid rgba(255,255,255,0.15);
-            font-family: monospace;
-            color: var(--text-muted);
         }
 
-        .scroll-indicator {
-            position: absolute;
-            bottom: 2rem;
-            left: 50%;
-            transform: translateX(-50%);
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 0.3rem;
-            color: var(--text-muted);
-            font-size: 0.75rem;
-            animation: scroll-bounce 2s ease-in-out infinite;
-            letter-spacing: 2px;
-            text-transform: uppercase;
-        }
-        .scroll-indicator i {
-            font-size: 1.2rem;
-        }
-        @keyframes scroll-bounce {
-            0%, 100% { transform: translateX(-50%) translateY(0); }
-            50%      { transform: translateX(-50%) translateY(6px); }
+        .button-primary {
+            color: var(--steel-950);
+            background: var(--brass);
         }
 
-        /* ───────── SECTIONS ───────── */
-        .section {
+        .button-secondary {
+            color: var(--parchment);
+            background: transparent;
+        }
+
+        .operations-map {
             position: relative;
-            z-index: 1;
-            max-width: 1100px;
-            margin: 0 auto;
-            padding: 5rem 1.5rem;
+            min-height: 28rem;
+            padding: 2rem;
+            border: 1px solid var(--line);
+            background: var(--steel-850);
         }
 
-        .section-label {
-            font-family: var(--font-display);
-            font-size: 0.75rem;
-            letter-spacing: 4px;
+        .map-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 1rem;
+            height: 100%;
+        }
+
+        .map-node {
+            display: flex;
+            min-height: 7rem;
+            flex-direction: column;
+            justify-content: space-between;
+            padding: 1rem;
+            border: 1px solid var(--line);
+            background: rgba(16, 22, 33, 0.72);
+        }
+
+        .map-node strong {
+            font-family: var(--display);
+            font-size: 1.25rem;
             text-transform: uppercase;
-            color: var(--gold);
-            margin-bottom: 0.25rem;
         }
 
-        .section-title {
-            font-family: var(--font-display);
-            font-size: clamp(1.6rem, 3vw, 2.2rem);
-            font-weight: 700;
-            color: var(--text);
+        .map-node span {
+            color: var(--muted);
+            font-family: var(--mono);
+            font-size: 0.68rem;
+        }
+
+        .map-node-primary {
+            grid-column: 1 / -1;
+            color: var(--steel-950);
+            background: var(--map-cyan);
+        }
+
+        .map-node-primary span {
+            color: rgba(16, 22, 33, 0.72);
+        }
+
+        .stat-strip,
+        .problem-grid,
+        .module-grid,
+        .workflow-grid,
+        .data-grid,
+        .stack-grid {
+            display: grid;
+            gap: 1rem;
+        }
+
+        .stat-strip {
+            grid-template-columns: repeat(3, 1fr);
+            margin-top: 3rem;
+        }
+
+        .stat {
+            padding-top: 1rem;
+            border-top: 1px solid var(--line);
+        }
+
+        .stat strong {
+            display: block;
+            color: var(--brass);
+            font-family: var(--display);
+            font-size: 2.4rem;
+        }
+
+        .stat span {
+            color: var(--muted);
+            font-family: var(--mono);
+            font-size: 0.72rem;
+            text-transform: uppercase;
+        }
+
+        .problem-grid {
+            grid-template-columns: repeat(5, 1fr);
+        }
+
+        .problem-card,
+        .module-card,
+        .workflow-card,
+        .data-card,
+        .stack-card {
+            padding: 1.35rem;
+            border: 1px solid var(--line);
+            background: rgba(23, 35, 52, 0.58);
+        }
+
+        .problem-card p,
+        .module-card p,
+        .workflow-card p,
+        .data-card p,
+        .stack-card p {
+            margin-bottom: 0;
+            color: var(--muted);
+            font-size: 0.9rem;
+        }
+
+        .problem-code,
+        .module-kind,
+        .workflow-code,
+        .stack-version {
+            display: block;
             margin-bottom: 1rem;
-            letter-spacing: 1px;
+            color: var(--map-cyan);
+            font-family: var(--mono);
+            font-size: 0.68rem;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
         }
 
-        .section-desc {
-            color: var(--text-muted);
-            max-width: 600px;
-            font-size: 1rem;
-            margin-bottom: 3rem;
+        .module-grid {
+            grid-template-columns: repeat(3, 1fr);
         }
 
-        .section-title-center {
-            text-align: center;
-        }
-        .section-desc-center {
-            margin-left: auto;
-            margin-right: auto;
-            text-align: center;
+        .module-card.featured {
+            border-color: rgba(210, 168, 74, 0.58);
         }
 
-        /* ───────── ABOUT ───────── */
-        .about-grid {
+        .module-card.service {
+            border-style: dashed;
+        }
+
+        .module-card.ai-service {
+            grid-column: span 2;
+            border-color: rgba(112, 183, 200, 0.52);
+        }
+
+        .module-meta {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+            margin-top: 1.25rem;
+        }
+
+        .pill {
+            padding: 0.28rem 0.45rem;
+            border: 1px solid rgba(157, 169, 181, 0.24);
+            color: var(--muted);
+            font-family: var(--mono);
+            font-size: 0.65rem;
+        }
+
+        .architecture-board {
             display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 3rem;
-            align-items: center;
-        }
-        .about-quote {
-            font-size: 1.15rem;
-            font-weight: 300;
-            line-height: 1.7;
-            color: var(--text-muted);
-            border-left: 3px solid var(--gold);
-            padding-left: 1.5rem;
-            font-style: italic;
-        }
-        .about-stats {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 1.5rem;
-        }
-        .stat-item {
-            background: var(--bg-card);
-            border: 1px solid rgba(255,255,255,0.05);
-            border-radius: 14px;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 1rem;
             padding: 1.5rem;
-            text-align: center;
-            backdrop-filter: blur(8px);
-            transition: border-color 0.3s;
-        }
-        .stat-item:hover { border-color: rgba(241,196,15,0.2); }
-        .stat-number {
-            font-family: var(--font-display);
-            font-size: 2rem;
-            font-weight: 700;
-            background: linear-gradient(135deg, var(--gold), var(--crimson));
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-        }
-        .stat-label {
-            font-size: 0.85rem;
-            color: var(--text-muted);
-            margin-top: 0.25rem;
+            border: 1px solid var(--line);
+            background: var(--steel-850);
         }
 
-        /* ───────── FEATURES GRID ───────── */
-        .features-grid {
+        .architecture-node {
+            min-height: 10rem;
+            padding: 1.25rem;
+            border: 1px solid var(--line);
+            background: rgba(16, 22, 33, 0.8);
+        }
+
+        .architecture-node.core {
+            color: var(--steel-950);
+            background: var(--brass);
+        }
+
+        .architecture-node.core p {
+            color: rgba(16, 22, 33, 0.72);
+        }
+
+        .architecture-node p {
+            margin-bottom: 0;
+            color: var(--muted);
+            font-size: 0.86rem;
+        }
+
+        .architecture-note {
+            grid-column: 1 / -1;
+            margin: 0;
+            padding-top: 1rem;
+            border-top: 1px solid var(--line);
+            color: var(--muted);
+            font-family: var(--mono);
+            font-size: 0.72rem;
+        }
+
+        .workflow-grid {
+            grid-template-columns: repeat(3, 1fr);
+        }
+
+        .command-summary {
+            margin: 0;
+            color: var(--muted);
+            font-family: var(--mono);
+            font-size: 0.78rem;
+        }
+
+        .command-toolbar {
+            display: grid;
+            grid-template-columns: minmax(16rem, 0.8fr) 1.2fr;
+            gap: 1rem;
+            margin: 2rem 0 1.5rem;
+            padding: 1rem;
+            border: 1px solid var(--line);
+            background: rgba(23, 35, 52, 0.72);
+        }
+
+        .command-search-label {
+            display: grid;
+            gap: 0.45rem;
+            color: var(--map-cyan);
+            font-family: var(--mono);
+            font-size: 0.68rem;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+
+        .command-search {
+            width: 100%;
+            min-height: 2.75rem;
+            padding: 0.7rem 0.85rem;
+            border: 1px solid rgba(232, 224, 207, 0.22);
+            border-radius: 0;
+            color: var(--parchment);
+            background: var(--steel-950);
+            font: 0.82rem var(--mono);
+        }
+
+        .command-search::placeholder {
+            color: #778696;
+        }
+
+        .command-filter-group {
+            display: flex;
+            flex-wrap: wrap;
+            align-content: end;
+            justify-content: flex-end;
+            gap: 0.5rem;
+        }
+
+        .command-filter {
+            min-height: 2.3rem;
+            padding: 0.45rem 0.7rem;
+            border: 1px solid rgba(112, 183, 200, 0.3);
+            border-radius: 0;
+            color: var(--muted);
+            background: transparent;
+            cursor: pointer;
+            font: 0.68rem var(--mono);
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+        }
+
+        .command-filter:hover,
+        .command-filter[aria-pressed="true"] {
+            border-color: var(--brass);
+            color: var(--steel-950);
+            background: var(--brass);
+        }
+
+        .command-result {
+            grid-column: 1 / -1;
+            margin: 0;
+        }
+
+        .command-table {
+            width: 100%;
+            border-collapse: collapse;
+            border: 1px solid var(--line);
+        }
+
+        .command-table th,
+        .command-table td {
+            padding: 0.9rem 1rem;
+            border-bottom: 1px solid var(--line);
+            text-align: left;
+            vertical-align: top;
+        }
+
+        .command-table th {
+            color: var(--map-cyan);
+            background: var(--steel-850);
+            font-family: var(--mono);
+            font-size: 0.68rem;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+
+        .command-table code {
+            color: var(--brass);
+            font-family: var(--mono);
+            font-size: 0.8rem;
+        }
+
+        .command-table td {
+            color: var(--muted);
+            font-size: 0.86rem;
+        }
+
+        .command-table td:first-child {
+            width: 25%;
+        }
+
+        .command-table td:nth-child(2) {
+            width: 18%;
+        }
+
+        .command-system {
+            color: var(--parchment);
+            font-family: var(--display);
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .data-grid {
+            grid-template-columns: repeat(4, 1fr);
+        }
+
+        .stack-grid {
+            grid-template-columns: repeat(4, 1fr);
+        }
+
+        .verification-list {
             display: grid;
             grid-template-columns: repeat(3, 1fr);
-            gap: 1.25rem;
+            gap: 1px;
+            margin-top: 2rem;
+            padding: 1px;
+            background: var(--line);
         }
 
-        .feature-card {
-            background: var(--bg-card);
-            border: 1px solid rgba(255,255,255,0.06);
-            border-radius: 18px;
-            padding: 2rem 1.75rem;
-            backdrop-filter: blur(12px);
-            transition: all 0.4s cubic-bezier(0.25, 0.8, 0.25, 1);
-            position: relative;
-            overflow: hidden;
+        .verification-item {
+            padding: 1.2rem;
+            color: var(--muted);
+            background: var(--steel-950);
+            font-family: var(--mono);
+            font-size: 0.74rem;
         }
-        .feature-card::before {
-            content: '';
-            position: absolute;
-            top: 0; left: 0; right: 0;
-            height: 2px;
-            background: linear-gradient(90deg, transparent, var(--accent, var(--gold)), transparent);
-            opacity: 0.3;
-            transition: opacity 0.3s;
-        }
-        .feature-card:hover {
-            transform: translateY(-6px);
-            border-color: var(--accent);
-            box-shadow: 0 12px 40px rgba(0,0,0,0.4), 0 0 30px color-mix(in srgb, var(--accent) 10%, transparent);
-            background: rgba(255,255,255,0.05);
-        }
-        .feature-card:hover::before { opacity: 1; }
 
-        .feature-icon {
-            width: 50px; height: 50px;
-            border-radius: 14px;
+        .verification-item strong {
+            display: block;
+            margin-bottom: 0.35rem;
+            color: var(--parchment);
+            font-family: var(--display);
+            font-size: 1.5rem;
+        }
+
+        .site-footer {
+            padding: 3rem 0;
+            background: #0c1119;
+        }
+
+        .footer-layout {
             display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 1.4rem;
-            margin-bottom: 1.2rem;
-            background: color-mix(in srgb, var(--accent, var(--gold)) 12%, transparent);
-            border: 1px solid color-mix(in srgb, var(--accent, var(--gold)) 20%, transparent);
-            transition: all 0.3s;
-        }
-        .feature-card:hover .feature-icon {
-            background: var(--accent, var(--gold));
-            color: #0a0a0f;
-            box-shadow: 0 0 20px color-mix(in srgb, var(--accent, var(--gold)) 40%, transparent);
-        }
-        .feature-icon i { transition: none; }
-
-        .feature-card h3 {
-            font-size: 1.15rem;
-            font-weight: 700;
-            margin-bottom: 0.6rem;
-            letter-spacing: 0.3px;
-        }
-        .feature-card p {
-            color: var(--text-muted);
-            font-size: 0.9rem;
-            line-height: 1.65;
-            margin-bottom: 1rem;
-            flex-grow: 1;
-        }
-        .feature-tags {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 0.4rem;
-        }
-        .tag {
-            background: rgba(255,255,255,0.04);
-            border: 1px solid rgba(255,255,255,0.07);
-            padding: 0.2rem 0.55rem;
-            border-radius: 6px;
-            font-size: 0.75rem;
-            color: var(--text-muted);
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 2rem;
         }
 
-        /* ───────── COMMANDS TABLE ───────── */
-        .commands-table {
-            width: 100%;
-            border-collapse: separate;
-            border-spacing: 0 0.4rem;
-        }
-        .commands-table tr {
-            background: var(--bg-card);
-            border-radius: 12px;
-            display: table-row;
-            transition: background 0.2s;
-        }
-        .commands-table td {
-            padding: 1rem 1.25rem;
-            font-size: 0.9rem;
-            border: 1px solid rgba(255,255,255,0.04);
-        }
-        .commands-table td:first-child {
-            border-radius: 12px 0 0 12px;
-            font-family: monospace;
-            font-weight: 600;
-            color: var(--gold);
-            white-space: nowrap;
-            width: 180px;
-        }
-        .commands-table td:last-child {
-            border-radius: 0 12px 12px 0;
-            color: var(--text-muted);
-        }
-        .commands-table tr:hover {
-            background: rgba(255,255,255,0.06);
-        }
-        .cmd-badge {
-            display: inline-block;
-            font-size: 0.65rem;
-            padding: 0.15rem 0.45rem;
-            border-radius: 4px;
-            background: rgba(241,196,15,0.1);
-            color: var(--gold);
-            border: 1px solid rgba(241,196,15,0.15);
-            margin-left: 0.5rem;
-            vertical-align: middle;
-            font-family: var(--font-body);
-            font-weight: 500;
-        }
-
-        /* ───────── FOOTER ───────── */
-        footer {
-            position: relative;
-            z-index: 1;
-            text-align: center;
-            padding: 2.5rem 1.5rem;
-            border-top: 1px solid rgba(255,255,255,0.04);
-            background: rgba(0,0,0,0.3);
-        }
-        .footer-links {
-            display: flex;
-            flex-wrap: wrap;
-            justify-content: center;
-            gap: 1.5rem;
-            margin-bottom: 1rem;
-        }
-        .footer-links a {
-            color: var(--text-muted);
-            text-decoration: none;
-            font-size: 0.9rem;
-            display: inline-flex;
-            align-items: center;
-            gap: 0.4rem;
-            transition: color 0.2s;
-        }
-        .footer-links a:hover { color: var(--gold); }
         .footer-copy {
-            font-size: 0.8rem;
-            color: rgba(255,255,255,0.2);
+            max-width: 42rem;
+            color: var(--muted);
+            font-size: 0.82rem;
         }
 
-        /* ───────── RESPONSIVE ───────── */
-        @media (max-width: 900px) {
-            .features-grid {
-                grid-template-columns: repeat(2, 1fr);
-            }
-            .about-grid {
-                grid-template-columns: 1fr;
-                gap: 2rem;
-            }
-        }
-        @media (max-width: 600px) {
-            .features-grid {
-                grid-template-columns: 1fr;
-            }
-            .about-stats {
-                grid-template-columns: 1fr 1fr;
-                gap: 0.75rem;
-            }
-            .hero h1 { letter-spacing: 2px; }
-            .hero-actions { flex-direction: column; }
-            .commands-table td {
-                display: block;
-                border: none;
-                padding: 0.5rem 1rem;
-            }
-            .commands-table td:first-child {
-                border-radius: 12px 12px 0 0;
-                padding-top: 1rem;
-            }
-            .commands-table td:last-child {
-                border-radius: 0 0 12px 12px;
-                padding-bottom: 1rem;
-            }
-            .commands-table tr {
-                display: block;
-                border: 1px solid rgba(255,255,255,0.04);
-                border-radius: 12px;
-            }
-            .cmd-badge { margin-left: 0.3rem; }
+        .footer-links {
+            flex-wrap: wrap;
+            justify-content: flex-end;
+            font-family: var(--mono);
+            font-size: 0.72rem;
         }
 
-        /* ───────── REVEAL ANIMATIONS ───────── */
-        .reveal {
+        .footer-links a:hover {
+            color: var(--brass);
+        }
+
+        .reveal-ready [data-reveal] {
             opacity: 0;
-            transform: translateY(30px);
-            transition: opacity 0.7s ease, transform 0.7s ease;
+            transform: translateY(1.25rem);
+            transition: opacity 480ms ease, transform 480ms ease;
         }
-        .reveal.visible {
+
+        .reveal-ready [data-reveal].is-visible {
             opacity: 1;
             transform: translateY(0);
+        }
+
+        @media (max-width: 960px) {
+            .hero-layout,
+            .problem-grid,
+            .architecture-board {
+                grid-template-columns: 1fr 1fr;
+            }
+
+            .module-grid,
+            .workflow-grid,
+            .data-grid,
+            .stack-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+
+            .architecture-note {
+                grid-column: 1 / -1;
+            }
+        }
+
+        @media (max-width: 720px) {
+            .site-nav,
+            .footer-layout {
+                align-items: flex-start;
+                flex-direction: column;
+                padding-block: 1rem;
+            }
+
+            .nav-links,
+            .footer-links {
+                justify-content: flex-start;
+            }
+
+            .hero-layout,
+            .problem-grid,
+            .module-grid,
+            .workflow-grid,
+            .data-grid,
+            .stack-grid,
+            .architecture-board,
+            .verification-list {
+                grid-template-columns: 1fr;
+            }
+
+            .module-card.ai-service {
+                grid-column: auto;
+            }
+
+            .stat-strip {
+                grid-template-columns: 1fr;
+            }
+
+            .command-toolbar {
+                grid-template-columns: 1fr;
+            }
+
+            .command-filter-group {
+                justify-content: flex-start;
+            }
+
+            .command-filter {
+                flex: 1 1 auto;
+            }
+
+            .command-table,
+            .command-table tbody,
+            .command-table tr,
+            .command-table td {
+                display: block;
+                width: 100%;
+            }
+
+            .command-table thead {
+                position: absolute;
+                width: 1px;
+                height: 1px;
+                overflow: hidden;
+                clip: rect(0 0 0 0);
+            }
+
+            .command-table tr {
+                padding: 1rem;
+                border-bottom: 1px solid var(--line);
+            }
+
+            .command-table td {
+                padding: 0.25rem 0;
+                border: 0;
+            }
+
+            .command-table td:first-child,
+            .command-table td:nth-child(2) {
+                width: 100%;
+            }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            html {
+                scroll-behavior: auto;
+            }
+
+            *,
+            *::before,
+            *::after {
+                scroll-behavior: auto !important;
+                transition-duration: 0.01ms !important;
+                animation-duration: 0.01ms !important;
+                animation-iteration-count: 1 !important;
+            }
         }
     </style>
 </head>
 <body>
+    <a class="skip-link" href="#main-content">Bỏ qua điều hướng</a>
 
-    <!-- Particles -->
-    <div id="particles"></div>
-
-    <!-- Hero -->
-    <section class="hero">
-        <div class="hero-glow"></div>
-
-        <div class="shield">
-            <i class="fa-solid fa-shield-halved"></i>
-        </div>
-
-        <h1>TNC GUILD MANAGER</h1>
-        <p class="hero-sub">
-            Discord Bot tối ưu hóa vận hành, quản lý điểm hoạt động và ngân quỹ<br>
-            cho Guild <strong style="color:var(--gold)">TNC</strong> trong thế giới <strong style="color:var(--crimson)">Albion Online</strong>.
-        </p>
-
-        <div class="hero-actions">
-            <a href="https://discord.com/oauth2/authorize?client_id=YOUR_CLIENT_ID&permissions=8&scope=bot" class="btn-primary" target="_blank">
-                <i class="fa-brands fa-discord"></i> Mời Bot Vào Server
+    <header class="site-header">
+        <nav class="site-nav" aria-label="Điều hướng chính">
+            <a class="brand" href="#overview" aria-label="TNC Guild Operations — về đầu trang">
+                <span class="brand-mark" aria-hidden="true">T</span>
+                <span class="brand-copy">TNC Operations</span>
             </a>
-            <div class="status-badge">
-                <span class="status-dot"></span>
-                <span>BOT ONLINE</span>
-                <span class="session-id">Session #{{ session_id }}</span>
+            <div class="nav-links">
+                <a href="#modules">Module</a>
+                <a href="#architecture">Kiến trúc</a>
+                <a href="#commands">34 lệnh</a>
+                <a href="#stack">Công nghệ</a>
+                <a href="https://github.com/namdzaixd-cpu/Bot_Albion_TNC" target="_blank" rel="noreferrer">GitHub ↗</a>
             </div>
-        </div>
+        </nav>
+    </header>
 
-        <div class="scroll-indicator">
-            <span>Khám phá</span>
-            <i class="fa-solid fa-chevron-down"></i>
-        </div>
-    </section>
+    <main id="main-content">
+        <section class="hero" id="overview">
+            <div class="section-shell hero-layout">
+                <div>
+                    <div class="service-status">
+                        <span class="status-dot" aria-hidden="true"></span>
+                        <span>Web service đang phản hồi · Session #{{ session_id }}</span>
+                    </div>
+                    <p class="eyebrow">The Northern Constellations · Albion Online</p>
+                    <h1>TNC Guild Operations</h1>
+                    <p class="hero-lead">
+                        Một hệ thống Discord Bot biến những công việc lặp lại của Officer thành luồng vận hành rõ ràng:
+                        tiếp nhận thành viên, tổ chức đội hình, theo dõi đóng góp, kiểm tra guild, đọc voice và quản lý Core-Bank.
+                    </p>
+                    <div class="hero-actions">
+                        <a class="button button-primary" href="#commands">Tra cứu 34 lệnh</a>
+                        <a class="button button-secondary" href="https://github.com/namdzaixd-cpu/Bot_Albion_TNC" target="_blank" rel="noreferrer">Xem mã nguồn ↗</a>
+                        <a class="button button-secondary" href="https://discord.gg/PhMqCskBJ" target="_blank" rel="noreferrer">Discord TNC ↗</a>
+                    </div>
+                    <div class="stat-strip" aria-label="Thông số đã kiểm chứng">
+                        <div class="stat">
+                            <strong>9</strong>
+                            <span>Cog được nạp</span>
+                        </div>
+                        <div class="stat">
+                            <strong>34</strong>
+                            <span>Lệnh slash &amp; subcommand</span>
+                        </div>
+                        <div class="stat">
+                            <strong>26</strong>
+                            <span>Python tests đã đạt khi review</span>
+                        </div>
+                    </div>
+                </div>
 
-    <!-- About -->
-    <section class="section" id="about">
-        <div class="about-grid">
-            <div class="reveal">
-                <div class="section-label">Về TNC</div>
-                <h2 class="section-title">Guild Việt trên<br>Albion Online</h2>
-                <p class="about-quote">
-                    "TNC là một cộng đồng game thủ Albion Online người Việt, hoạt động mạnh trong cả
-                    PVP và PVE. Bot này ra đời để giúp anh em trong guild quản lý điểm siphoned, tổ chức
-                    massing, kiểm tra thành viên và nhiều hơn thế."
+                <aside class="operations-map" aria-label="Sơ đồ vận hành thu gọn">
+                    <p class="eyebrow">Operations constellation</p>
+                    <div class="map-grid">
+                        <div class="map-node map-node-primary">
+                            <strong>Discord Bot</strong>
+                            <span>9 cogs · Python · Render</span>
+                        </div>
+                        <div class="map-node">
+                            <strong>Supabase</strong>
+                            <span>state · config · logs</span>
+                        </div>
+                        <div class="map-node">
+                            <strong>Dashboard</strong>
+                            <span>Next.js · Discord OAuth</span>
+                        </div>
+                        <div class="map-node">
+                            <strong>Albion API</strong>
+                            <span>guild · member · player</span>
+                        </div>
+                        <div class="map-node">
+                            <strong>AI Bot</strong>
+                            <span>service &amp; repo riêng</span>
+                        </div>
+                    </div>
+                </aside>
+            </div>
+        </section>
+
+        <section id="problems">
+            <div class="section-shell">
+                <p class="eyebrow">Tại sao hệ thống tồn tại</p>
+                <h2>Giảm tải công việc Officer</h2>
+                <p class="section-intro">
+                    Mỗi module bám vào một điểm nghẽn có thật trong quá trình vận hành guild, từ lúc một người nộp đơn
+                    đến khi họ tham gia đội hình và đóng góp tài nguyên.
+                </p>
+                <div class="problem-grid">
+                    <article class="problem-card">
+                        <span class="problem-code">RECRUIT</span>
+                        <h3>Đơn vào guild</h3>
+                        <p>Chuẩn hóa forum apply, tên ingame, vai trò và bước duyệt của Officer.</p>
+                    </article>
+                    <article class="problem-card">
+                        <span class="problem-code">FORM-UP</span>
+                        <h3>Đội hình Massing</h3>
+                        <p>Thay bảng điểm danh thủ công bằng slot role, weapon và nút tương tác.</p>
+                    </article>
+                    <article class="problem-card">
+                        <span class="problem-code">CONTRIBUTE</span>
+                        <h3>Điểm đóng góp</h3>
+                        <p>Parse log Siphoned, ngăn cộng trùng và giữ lịch sử giao dịch để đối soát.</p>
+                    </article>
+                    <article class="problem-card">
+                        <span class="problem-code">VERIFY</span>
+                        <h3>Đối chiếu member</h3>
+                        <p>Tra cứu dữ liệu Albion theo region và nhận diện member mới trên Discord.</p>
+                    </article>
+                    <article class="problem-card">
+                        <span class="problem-code">TREASURY</span>
+                        <h3>Core &amp; ngân quỹ</h3>
+                        <p>Chuyển reaction trên ảnh nộp Core thành giá trị silver có thể kiểm tra.</p>
+                    </article>
+                </div>
+            </div>
+        </section>
+
+        <section id="modules">
+            <div class="section-shell">
+                <p class="eyebrow">Module map</p>
+                <h2>Một bot, nhiều luồng vận hành</h2>
+                <p class="section-intro">
+                    Bảy nhóm lệnh phục vụ người dùng, hai dịch vụ nền giữ dữ liệu đồng bộ và một AI Bot đã tách thành
+                    service độc lập để giảm tải tài nguyên.
+                </p>
+                <div class="module-grid">
+                    <article class="module-card featured">
+                        <span class="module-kind">10 lệnh · Contribution</span>
+                        <h3>Siphoned</h3>
+                        <p>Nhập log, xếp hạng, lọc theo thời gian, audit, export và điều chỉnh điểm thủ công có phân quyền.</p>
+                        <div class="module-meta"><span class="pill">Supabase</span><span class="pill">Log parser</span><span class="pill">Leaderboard</span></div>
+                    </article>
+                    <article class="module-card featured">
+                        <span class="module-kind">3 lệnh · Formation</span>
+                        <h3>Massing</h3>
+                        <p>Tạo party theo template, quản lý slot role/weapon và khôi phục nút tương tác sau restart.</p>
+                        <div class="module-meta"><span class="pill">Persistent view</span><span class="pill">Template</span><span class="pill">Weekly cleanup</span></div>
+                    </article>
+                    <article class="module-card">
+                        <span class="module-kind">5 lệnh · Recruit</span>
+                        <h3>Onboarding</h3>
+                        <p>Bot Thư Ký quản lý forum apply, kênh hướng dẫn, role Officer/Member và danh sách hồ sơ chờ.</p>
+                        <div class="module-meta"><span class="pill">Forum flow</span><span class="pill">Albion API</span><span class="pill">Config reload</span></div>
+                    </article>
+                    <article class="module-card">
+                        <span class="module-kind">3 lệnh · Verify</span>
+                        <h3>GuildCheck</h3>
+                        <p>Tra cứu thành viên theo ba region Albion, cấu hình guild và liệt kê member Discord mới gia nhập.</p>
+                        <div class="module-meta"><span class="pill">Asia</span><span class="pill">Americas</span><span class="pill">Europe</span></div>
+                    </article>
+                    <article class="module-card">
+                        <span class="module-kind">7 lệnh · Voice</span>
+                        <h3>ALO TTS</h3>
+                        <p>Đọc chat voice bằng tiếng Việt, quản lý queue, mute và tự nối lại voice sau sự cố hoặc redeploy.</p>
+                        <div class="module-meta"><span class="pill">gTTS</span><span class="pill">FFmpeg</span><span class="pill">Auto rejoin</span></div>
+                    </article>
+                    <article class="module-card">
+                        <span class="module-kind">5 lệnh · Treasury</span>
+                        <h3>Core-Bank</h3>
+                        <p>Đăng ký emoji Core, tự thả reaction, cộng/trừ silver qua UnbelievaBoat và ghi lịch sử credit.</p>
+                        <div class="module-meta"><span class="pill">Reaction flow</span><span class="pill">UnbelievaBoat</span><span class="pill">Audit</span></div>
+                    </article>
+                    <article class="module-card">
+                        <span class="module-kind">1 lệnh · Discover</span>
+                        <h3>About</h3>
+                        <p>Đưa người dùng từ Discord tới trang hồ sơ vận hành và repository của dự án.</p>
+                        <div class="module-meta"><span class="pill">/aboutme</span><span class="pill">Project links</span></div>
+                    </article>
+                    <article class="module-card service">
+                        <span class="module-kind">Background service</span>
+                        <h3>LastSeen</h3>
+                        <p>Ghi nhận hoạt động thành viên vào cache và flush theo batch lên bảng user_activity.</p>
+                        <div class="module-meta"><span class="pill">5-minute flush</span><span class="pill">Cache</span></div>
+                    </article>
+                    <article class="module-card service">
+                        <span class="module-kind">Background service</span>
+                        <h3>Discord Sync</h3>
+                        <p>Đồng bộ channel và role Discord lên Supabase khi bot sẵn sàng hoặc cấu trúc server thay đổi.</p>
+                        <div class="module-meta"><span class="pill">Channels</span><span class="pill">Roles</span><span class="pill">Event-driven</span></div>
+                    </article>
+                    <article class="module-card ai-service">
+                        <span class="module-kind">Separate runtime</span>
+                        <h3>TNC AI Chatbot</h3>
+                        <p>
+                            Chat, wiki, item lookup và learning đã chuyển sang bot, repository và Render riêng.
+                            Dashboard vẫn có thể gửi reload tới cả hai service mà không ghép lại runtime.
+                        </p>
+                        <div class="module-meta"><span class="pill">Independent bot</span><span class="pill">Independent deploy</span><span class="pill">Shared guild</span></div>
+                    </article>
+                </div>
+            </div>
+        </section>
+
+        <section id="architecture">
+            <div class="section-shell">
+                <p class="eyebrow">System architecture</p>
+                <h2>Dữ liệu đi qua những ranh giới rõ ràng</h2>
+                <p class="section-intro">
+                    Discord Bot và Dashboard dùng chung Supabase nhưng có runtime độc lập. Browser không cầm service-role key;
+                    mọi thao tác quản trị đi qua API server-side và Discord OAuth.
+                </p>
+                <div class="architecture-board" aria-label="Sơ đồ kiến trúc hệ thống">
+                    <article class="architecture-node">
+                        <span class="module-kind">Input</span>
+                        <h3>Discord &amp; Officer</h3>
+                        <p>Slash command, message, voice state, reaction và forum apply đi vào từng cog chuyên trách.</p>
+                    </article>
+                    <article class="architecture-node core">
+                        <span class="module-kind">Runtime chính</span>
+                        <h3>Python Discord Bot</h3>
+                        <p>Load 9 cog, đồng bộ command theo guild, giữ heartbeat, watchdog và Flask keep-alive.</p>
+                    </article>
+                    <article class="architecture-node">
+                        <span class="module-kind">External</span>
+                        <h3>Albion &amp; Bank APIs</h3>
+                        <p>Albion GameInfo phục vụ member/guild; UnbelievaBoat xử lý số dư trong Core-Bank.</p>
+                    </article>
+                    <article class="architecture-node">
+                        <span class="module-kind">Data plane</span>
+                        <h3>Supabase</h3>
+                        <p>Postgres, json_storage, config, transaction history, activity, heartbeat và system logs.</p>
+                    </article>
+                    <article class="architecture-node">
+                        <span class="module-kind">Control plane</span>
+                        <h3>Next.js Dashboard</h3>
+                        <p>Discord OAuth, API route server-side, quản trị module và quan sát trạng thái hai bot.</p>
+                    </article>
+                    <article class="architecture-node">
+                        <span class="module-kind">Runtime tách riêng</span>
+                        <h3>AI Chatbot</h3>
+                        <p>Token, deploy và vòng đời riêng; hoạt động trong cùng guild nhưng không còn nằm trong bot chính.</p>
+                    </article>
+                    <p class="architecture-note">
+                        Luồng cấu hình: Dashboard → Supabase → webhook reload → cog xóa cache → lần đọc kế tiếp nhận cấu hình mới.
+                    </p>
+                </div>
+            </div>
+        </section>
+
+        <section id="workflows">
+            <div class="section-shell">
+                <p class="eyebrow">Operational flows</p>
+                <h2>Từ tín hiệu Discord tới kết quả kiểm chứng được</h2>
+                <p class="section-intro">Sáu luồng dưới đây mô tả cơ chế thật thay vì chỉ liệt kê tên tính năng.</p>
+                <div class="workflow-grid">
+                    <article class="workflow-card">
+                        <span class="workflow-code">Forum → Review → Role</span>
+                        <h3>Onboarding</h3>
+                        <p>Bot đọc đơn trong forum, kiểm tra biểu mẫu/IGN, hướng dẫn ứng viên và lưu cấu hình guild trên Supabase.</p>
+                    </article>
+                    <article class="workflow-card">
+                        <span class="workflow-code">TXT → Parse → Ledger</span>
+                        <h3>Siphoned</h3>
+                        <p>Log mới được so timestamp, bỏ dòng overlap, cập nhật điểm và lưu transaction để audit theo thời gian.</p>
+                    </article>
+                    <article class="workflow-card">
+                        <span class="workflow-code">Modal → Slots → Buttons</span>
+                        <h3>Massing</h3>
+                        <p>Caller chọn template hoặc điền modal; thành viên dùng nút để nhận slot, di chuyển và lấp đội hình.</p>
+                    </article>
+                    <article class="workflow-card">
+                        <span class="workflow-code">Image → Reaction → Silver</span>
+                        <h3>Core-Bank</h3>
+                        <p>Ảnh trong core channel nhận reaction theo cấu hình; reaction add/remove ánh xạ sang biến động ngân quỹ.</p>
+                    </article>
+                    <article class="workflow-card">
+                        <span class="workflow-code">Region → Albion API → Result</span>
+                        <h3>GuildCheck</h3>
+                        <p>Officer cấu hình guild/region, bot truy vấn GameInfo và trả kết quả member theo dữ liệu ingame.</p>
+                    </article>
+                    <article class="workflow-card">
+                        <span class="workflow-code">Text → Queue → Voice</span>
+                        <h3>ALO TTS</h3>
+                        <p>Tin nhắn được làm sạch mention/link, đưa vào queue, tạo MP3 ngoài event loop và phát qua FFmpeg.</p>
+                    </article>
+                </div>
+            </div>
+        </section>
+
+        <section id="commands">
+            <div class="section-shell">
+                <p class="eyebrow">Command matrix</p>
+                <h2>34 lệnh đang được nạp</h2>
+                <p class="section-intro">
+                    Danh sách này lấy từ command decorator của 7 nhóm lệnh production. LastSeen và Discord Sync chạy nền nên không xuất hiện ở đây.
+                </p>
+                <div class="command-toolbar" aria-label="Tra cứu ma trận lệnh">
+                    <label class="command-search-label" for="command-search">
+                        Tìm theo tên hoặc mô tả
+                        <input class="command-search" id="command-search" type="search" placeholder="Ví dụ: core, massing, cấu hình…" autocomplete="off">
+                    </label>
+                    <div class="command-filter-group" aria-label="Lọc theo module">
+                        <button class="command-filter" type="button" data-command-filter="all" aria-pressed="true">Tất cả</button>
+                        <button class="command-filter" type="button" data-command-filter="about" aria-pressed="false">About</button>
+                        <button class="command-filter" type="button" data-command-filter="onboarding" aria-pressed="false">Onboarding</button>
+                        <button class="command-filter" type="button" data-command-filter="siphoned" aria-pressed="false">Siphoned</button>
+                        <button class="command-filter" type="button" data-command-filter="massing" aria-pressed="false">Massing</button>
+                        <button class="command-filter" type="button" data-command-filter="guildcheck" aria-pressed="false">GuildCheck</button>
+                        <button class="command-filter" type="button" data-command-filter="alo" aria-pressed="false">ALO</button>
+                        <button class="command-filter" type="button" data-command-filter="corebank" aria-pressed="false">Core-Bank</button>
+                    </div>
+                    <p class="command-summary command-result" id="command-result" aria-live="polite">34 / 34 lệnh</p>
+                </div>
+                <table class="command-table">
+                    <thead>
+                        <tr>
+                            <th scope="col">Lệnh</th>
+                            <th scope="col">Module</th>
+                            <th scope="col">Tác dụng</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr data-command="/aboutme" data-system="about">
+                            <td><code>/aboutme</code></td>
+                            <td><span class="command-system">About</span></td>
+                            <td>Giới thiệu TNC Manager Bot và dẫn tới trang hồ sơ dự án.</td>
+                        </tr>
+                        <tr data-command="/recuibot toggle" data-system="onboarding">
+                            <td><code>/recuibot toggle</code></td>
+                            <td><span class="command-system">Onboarding</span></td>
+                            <td>Bật hoặc tắt chế độ Bot Thư Ký tự động.</td>
+                        </tr>
+                        <tr data-command="/recuibot set_apply_channel" data-system="onboarding">
+                            <td><code>/recuibot set_apply_channel</code></td>
+                            <td><span class="command-system">Onboarding</span></td>
+                            <td>Chọn forum channel tiếp nhận đơn ứng tuyển.</td>
+                        </tr>
+                        <tr data-command="/recuibot setup_channels" data-system="onboarding">
+                            <td><code>/recuibot setup_channels</code></td>
+                            <td><span class="command-system">Onboarding</span></td>
+                            <td>Cấu hình các kênh được nhắc trong lời chào và hướng dẫn.</td>
+                        </tr>
+                        <tr data-command="/recuibot setup_roles" data-system="onboarding">
+                            <td><code>/recuibot setup_roles</code></td>
+                            <td><span class="command-system">Onboarding</span></td>
+                            <td>Cấu hình role Officer và Member cho quy trình duyệt đơn.</td>
+                        </tr>
+                        <tr data-command="/recuibot list" data-system="onboarding">
+                            <td><code>/recuibot list</code></td>
+                            <td><span class="command-system">Onboarding</span></td>
+                            <td>Xem cấu hình hiện tại và danh sách hồ sơ đang chờ.</td>
+                        </tr>
+                        <tr data-command="/spupdate" data-system="siphoned">
+                            <td><code>/spupdate</code></td>
+                            <td><span class="command-system">Siphoned</span></td>
+                            <td>Nhập file log Siphoned mới và tự chặn dữ liệu trùng hoặc cũ.</td>
+                        </tr>
+                        <tr data-command="/spcheck" data-system="siphoned">
+                            <td><code>/spcheck</code></td>
+                            <td><span class="command-system">Siphoned</span></td>
+                            <td>Xem bảng xếp hạng điểm tích lũy có phân trang.</td>
+                        </tr>
+                        <tr data-command="/sphistory" data-system="siphoned">
+                            <td><code>/sphistory</code></td>
+                            <td><span class="command-system">Siphoned</span></td>
+                            <td>Xem tối đa 20 giao dịch đóng góp gần nhất của một player.</td>
+                        </tr>
+                        <tr data-command="/sptop" data-system="siphoned">
+                            <td><code>/sptop</code></td>
+                            <td><span class="command-system">Siphoned</span></td>
+                            <td>Xếp hạng đóng góp theo khoảng thời gian được chọn.</td>
+                        </tr>
+                        <tr data-command="/splog" data-system="siphoned">
+                            <td><code>/splog</code></td>
+                            <td><span class="command-system">Siphoned</span></td>
+                            <td>Xem audit log các lần upload gần nhất dành cho Officer.</td>
+                        </tr>
+                        <tr data-command="/spexport" data-system="siphoned">
+                            <td><code>/spexport</code></td>
+                            <td><span class="command-system">Siphoned</span></td>
+                            <td>Xuất toàn bộ bảng điểm hiện tại thành file văn bản.</td>
+                        </tr>
+                        <tr data-command="/addsp" data-system="siphoned">
+                            <td><code>/addsp</code></td>
+                            <td><span class="command-system">Siphoned</span></td>
+                            <td>Cộng điểm thủ công cho một hoặc nhiều thành viên.</td>
+                        </tr>
+                        <tr data-command="/removesp" data-system="siphoned">
+                            <td><code>/removesp</code></td>
+                            <td><span class="command-system">Siphoned</span></td>
+                            <td>Trừ điểm thủ công cho một hoặc nhiều thành viên.</td>
+                        </tr>
+                        <tr data-command="/removesprole" data-system="siphoned">
+                            <td><code>/removesprole</code></td>
+                            <td><span class="command-system">Siphoned</span></td>
+                            <td>Xóa hoàn toàn player khỏi bảng điểm Siphoned.</td>
+                        </tr>
+                        <tr data-command="/resetsp" data-system="siphoned">
+                            <td><code>/resetsp</code></td>
+                            <td><span class="command-system">Siphoned</span></td>
+                            <td>Reset bảng điểm sau bước xác nhận có thời hạn.</td>
+                        </tr>
+                        <tr data-command="/massing" data-system="massing">
+                            <td><code>/massing</code></td>
+                            <td><span class="command-system">Massing</span></td>
+                            <td>Tạo party mới từ template hoặc cấu hình role/weapon riêng.</td>
+                        </tr>
+                        <tr data-command="/masstemplatelist" data-system="massing">
+                            <td><code>/masstemplatelist</code></td>
+                            <td><span class="command-system">Massing</span></td>
+                            <td>Liệt kê đội hình mẫu cùng số role và slot.</td>
+                        </tr>
+                        <tr data-command="/masstemplatedelete" data-system="massing">
+                            <td><code>/masstemplatedelete</code></td>
+                            <td><span class="command-system">Massing</span></td>
+                            <td>Xóa một template Massing dành cho Officer.</td>
+                        </tr>
+                        <tr data-command="/guildconfig" data-system="guildcheck">
+                            <td><code>/guildconfig</code></td>
+                            <td><span class="command-system">GuildCheck</span></td>
+                            <td>Cấu hình Albion Guild ID và region tra cứu.</td>
+                        </tr>
+                        <tr data-command="/guildcheck" data-system="guildcheck">
+                            <td><code>/guildcheck</code></td>
+                            <td><span class="command-system">GuildCheck</span></td>
+                            <td>Tra cứu một thành viên có còn thuộc guild hay không.</td>
+                        </tr>
+                        <tr data-command="/newmembers" data-system="guildcheck">
+                            <td><code>/newmembers</code></td>
+                            <td><span class="command-system">GuildCheck</span></td>
+                            <td>Liệt kê thành viên Discord mới gia nhập trong số ngày chỉ định.</td>
+                        </tr>
+                        <tr data-command="/alojoin" data-system="alo">
+                            <td><code>/alojoin</code></td>
+                            <td><span class="command-system">ALO TTS</span></td>
+                            <td>Đưa bot vào voice channel mà người dùng đang đứng.</td>
+                        </tr>
+                        <tr data-command="/aloleave" data-system="alo">
+                            <td><code>/aloleave</code></td>
+                            <td><span class="command-system">ALO TTS</span></td>
+                            <td>Cho bot rời voice channel hiện tại có chủ đích.</td>
+                        </tr>
+                        <tr data-command="/alonametoggle" data-system="alo">
+                            <td><code>/alonametoggle</code></td>
+                            <td><span class="command-system">ALO TTS</span></td>
+                            <td>Bật hoặc tắt đọc tên người gửi trước nội dung.</td>
+                        </tr>
+                        <tr data-command="/alo" data-system="alo">
+                            <td><code>/alo</code></td>
+                            <td><span class="command-system">ALO TTS</span></td>
+                            <td>Đưa một nội dung cụ thể vào hàng chờ đọc của voice channel.</td>
+                        </tr>
+                        <tr data-command="/aloconfig" data-system="alo">
+                            <td><code>/aloconfig</code></td>
+                            <td><span class="command-system">ALO TTS</span></td>
+                            <td>Cấu hình tự rejoin voice sau mất kết nối hoặc restart.</td>
+                        </tr>
+                        <tr data-command="/alomute" data-system="alo">
+                            <td><code>/alomute</code></td>
+                            <td><span class="command-system">ALO TTS</span></td>
+                            <td>Tạm dừng phát TTS nhưng vẫn giữ bot trong voice.</td>
+                        </tr>
+                        <tr data-command="/alounmute" data-system="alo">
+                            <td><code>/alounmute</code></td>
+                            <td><span class="command-system">ALO TTS</span></td>
+                            <td>Bật lại phát TTS trong voice channel hiện tại.</td>
+                        </tr>
+                        <tr data-command="/coresetup" data-system="corebank">
+                            <td><code>/coresetup</code></td>
+                            <td><span class="command-system">Core-Bank</span></td>
+                            <td>Cấu hình core channel, bank channel và tích hợp UnbelievaBoat.</td>
+                        </tr>
+                        <tr data-command="/coreadd" data-system="corebank">
+                            <td><code>/coreadd</code></td>
+                            <td><span class="command-system">Core-Bank</span></td>
+                            <td>Đăng ký một hoặc nhiều emoji Core cùng giá trị silver.</td>
+                        </tr>
+                        <tr data-command="/coreremove" data-system="corebank">
+                            <td><code>/coreremove</code></td>
+                            <td><span class="command-system">Core-Bank</span></td>
+                            <td>Xóa emoji Core khỏi cấu hình quy đổi.</td>
+                        </tr>
+                        <tr data-command="/coreautoreact" data-system="corebank">
+                            <td><code>/coreautoreact</code></td>
+                            <td><span class="command-system">Core-Bank</span></td>
+                            <td>Bật hoặc tắt tự động thả emoji lên ảnh trong core channel.</td>
+                        </tr>
+                        <tr data-command="/corelist" data-system="corebank">
+                            <td><code>/corelist</code></td>
+                            <td><span class="command-system">Core-Bank</span></td>
+                            <td>Xem danh sách emoji, giá trị và cấu hình Core-Bank hiện tại.</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <section id="data">
+            <div class="section-shell">
+                <p class="eyebrow">Data &amp; resilience</p>
+                <h2>Supabase là nguồn dữ liệu production</h2>
+                <p class="section-intro">
+                    Bot không còn phụ thuộc vào file JSON local để giữ state vận hành. Thư mục bot/Storage chỉ còn là dấu vết legacy;
+                    lớp storage hiện ánh xạ key file sang bảng json_storage và các module quan trọng dùng bảng chuyên biệt.
+                </p>
+                <div class="data-grid">
+                    <article class="data-card">
+                        <span class="module-kind">Lazy client</span>
+                        <h3>Khởi tạo an toàn</h3>
+                        <p>Client Supabase chỉ được tạo khi cần và trả lỗi rõ khi CI thiếu credential.</p>
+                    </article>
+                    <article class="data-card">
+                        <span class="module-kind">3 attempts</span>
+                        <h3>Retry có backoff</h3>
+                        <p>Database wrapper thử lại tối đa ba lần với khoảng chờ tăng dần.</p>
+                    </article>
+                    <article class="data-card">
+                        <span class="module-kind">60 seconds</span>
+                        <h3>Heartbeat thật</h3>
+                        <p>Bot ghi last_seen và latency mỗi phút để Dashboard phân biệt online/offline.</p>
+                    </article>
+                    <article class="data-card">
+                        <span class="module-kind">Config reload</span>
+                        <h3>Không cần restart</h3>
+                        <p>Dashboard báo bot xóa cache cấu hình; lần đọc sau nhận dữ liệu mới từ Supabase.</p>
+                    </article>
+                </div>
+            </div>
+        </section>
+
+        <section id="stack">
+            <div class="section-shell">
+                <p class="eyebrow">Technology &amp; verification</p>
+                <h2>Stack nhỏ, ranh giới rõ</h2>
+                <p class="section-intro">
+                    Bot chính, data plane và control plane có trách nhiệm riêng. Các con số kiểm chứng dưới đây được chạy trên source
+                    tại thời điểm review, không phải số liệu marketing.
+                </p>
+                <div class="stack-grid">
+                    <article class="stack-card">
+                        <span class="stack-version">discord.py 2.7.1</span>
+                        <h3>Python Bot</h3>
+                        <p>Cog architecture, slash commands, event listeners, background tasks và Discord voice.</p>
+                    </article>
+                    <article class="stack-card">
+                        <span class="stack-version">Flask 3.1.3</span>
+                        <h3>Render Web Service</h3>
+                        <p>Phục vụ dossier công khai và tiếp nhận tín hiệu reload cấu hình.</p>
+                    </article>
+                    <article class="stack-card">
+                        <span class="stack-version">Supabase 2.31</span>
+                        <h3>Postgres Data Plane</h3>
+                        <p>State, cấu hình, transaction, activity, heartbeat và system logs.</p>
+                    </article>
+                    <article class="stack-card">
+                        <span class="stack-version">Next.js 16 · React 19</span>
+                        <h3>Admin Dashboard</h3>
+                        <p>Discord OAuth, API server-side và giao diện điều khiển module.</p>
+                    </article>
+                </div>
+                <div class="verification-list" aria-label="Kết quả kiểm chứng">
+                    <div class="verification-item"><strong>26 passed</strong>Python test suite sau khi bổ sung contract test</div>
+                    <div class="verification-item"><strong>Compile OK</strong>Toàn bộ module Python trong bot/</div>
+                    <div class="verification-item"><strong>21 routes</strong>Next.js production build thành công</div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <footer class="site-footer">
+        <div class="section-shell footer-layout">
+            <div>
+                <p class="eyebrow">The Northern Constellations</p>
+                <p class="footer-copy">
+                    Guild Operations Dossier phản ánh mã nguồn Bot TNC tại thời điểm review ngày 22/08/2026.
+                    Trạng thái web service không thay thế heartbeat Discord Bot trong Dashboard.
                 </p>
             </div>
-            <div class="about-stats reveal">
-                <div class="stat-item">
-                    <div class="stat-number">5+</div>
-                    <div class="stat-label">Hệ Thống Tính Năng</div>
-                </div>
-                <div class="stat-item">
-                    <div class="stat-number">20+</div>
-                    <div class="stat-label">Slash Commands</div>
-                </div>
-                <div class="stat-item">
-                    <div class="stat-number">24/7</div>
-                    <div class="stat-label">Online Uptime</div>
-                </div>
-                <div class="stat-item">
-                    <div class="stat-number">JSON</div>
-                    <div class="stat-label">Auto Backup</div>
-                </div>
+            <div class="footer-links" aria-label="Liên kết dự án">
+                <a data-link="github" href="https://github.com/namdzaixd-cpu/Bot_Albion_TNC" target="_blank" rel="noreferrer">GitHub Bot</a>
+                <a data-link="chatbot" href="https://github.com/kudominer/TNC-Chatbot" target="_blank" rel="noreferrer">AI Bot</a>
+                <a data-link="discord" href="https://discord.gg/PhMqCskBJ" target="_blank" rel="noreferrer">Discord</a>
+                <a data-link="albion" href="https://albiononline.com" target="_blank" rel="noreferrer">Albion Online</a>
             </div>
         </div>
-    </section>
-
-    <!-- Features -->
-    <section class="section" id="features">
-        <div class="section-label section-title-center">Hệ Thống Tính Năng</div>
-        <h2 class="section-title section-title-center">Vận Hành Guild Tự Động</h2>
-        <p class="section-desc section-desc-center">
-            6 hệ thống tích hợp — từ quản lý điểm số, tổ chức party, kiểm tra thành viên đến voice chat.
-        </p>
-
-        <div class="features-grid">
-            <!-- 1. SP -->
-            <div class="feature-card reveal" style="--accent: #3498db">
-                <div class="feature-icon"><i class="fa-solid fa-gem"></i></div>
-                <h3>Siphoned Points</h3>
-                <p>Parse file log `.txt` hoạt động bang hội, cộng dồn điểm siphoned theo người chơi, bảng xếp hạng phân trang.</p>
-                <div class="feature-tags">
-                    <span class="tag">Log Parser</span>
-                    <span class="tag">Leaderboard</span>
-                    <span class="tag">Phân Trang</span>
-                </div>
-            </div>
-
-            <!-- 2. Massing -->
-            <div class="feature-card reveal" style="--accent: #e74c3c">
-                <div class="feature-icon"><i class="fa-solid fa-users-rays"></i></div>
-                <h3>Massing PVP/PVE</h3>
-                <p>Khởi tạo party theo role & weapon, UI nút bấm join/kick/move/fill, lưu template, tự khôi phục sau restart.</p>
-                <div class="feature-tags">
-                    <span class="tag">Interactive UI</span>
-                    <span class="tag">Templates</span>
-                    <span class="tag">Auto Restore</span>
-                </div>
-            </div>
-
-            <!-- 3. GuildCheck -->
-            <div class="feature-card reveal" style="--accent: #2ecc71">
-                <div class="feature-icon"><i class="fa-solid fa-user-check"></i></div>
-                <h3>GuildCheck</h3>
-                <p>Đăng ký IGN, kiểm tra qua Albion API xem còn trong guild không, tự xóa role Discord nếu đã rời.</p>
-                <div class="feature-tags">
-                    <span class="tag">Albion API</span>
-                    <span class="tag">Auto Sync</span>
-                    <span class="tag">Role Manager</span>
-                </div>
-            </div>
-
-            <!-- 4. Alo TTS -->
-            <div class="feature-card reveal" style="--accent: #9b59b6">
-                <div class="feature-icon"><i class="fa-solid fa-volume-high"></i></div>
-                <h3>Alo Voice (TTS)</h3>
-                <p>Đọc chat thành giọng nói qua gTTS vào voice channel, auto reconnect khi mất kết nối.</p>
-                <div class="feature-tags">
-                    <span class="tag">gTTS</span>
-                    <span class="tag">Voice Channel</span>
-                    <span class="tag">Auto Rejoin</span>
-                </div>
-            </div>
-
-            <!-- 5. Core-Bank -->
-            <div class="feature-card reveal" style="--accent: #f1c40f">
-                <div class="feature-icon"><i class="fa-solid fa-coins"></i></div>
-                <h3>Core &amp; Bank</h3>
-                <p>Auto react lên ảnh core nộp, quy đổi ra silver qua UnbelievaBoat, audit log đầy đủ.</p>
-                <div class="feature-tags">
-                    <span class="tag">Auto React</span>
-                    <span class="tag">UnbelievaBoat</span>
-                    <span class="tag">Audit Log</span>
-                </div>
-            </div>
-
-            <!-- 6. Backup -->
-            <div class="feature-card reveal" style="--accent: #95a5a6">
-                <div class="feature-icon"><i class="fa-solid fa-cloud-arrow-up"></i></div>
-                <h3>Sao Lưu Dữ Liệu</h3>
-                <p>Cơ chế safe-write .tmp/.bak chống hỏng JSON, tự động git push dữ liệu lên GitHub định kỳ.</p>
-                <div class="feature-tags">
-                    <span class="tag">Safe-Write</span>
-                    <span class="tag">GitHub Sync</span>
-                    <span class="tag">JSON DB</span>
-                </div>
-            </div>
-        </div>
-    </section>
-
-    <!-- Commands -->
-    <section class="section" id="commands">
-        <div class="section-label section-title-center">Slash Commands</div>
-        <h2 class="section-title section-title-center">Mọi Thứ Trong Tầm Tay</h2>
-        <p class="section-desc section-desc-center">
-            Điều khiển bot hoàn toàn qua lệnh slash — nhanh gọn, trực quan.
-        </p>
-
-        <div class="reveal">
-            <table class="commands-table">
-                <tr>
-                    <td>/spupdate <span class="cmd-badge">SP</span></td>
-                    <td>Cập nhật điểm Siphoned từ file log</td>
-                </tr>
-                <tr>
-                    <td>/spcheck <span class="cmd-badge">SP</span></td>
-                    <td>Kiểm tra điểm SP của người chơi</td>
-                </tr>
-                <tr>
-                    <td>/massing <span class="cmd-badge">Mass</span></td>
-                    <td>Tạo party PVP/PVE mới</td>
-                </tr>
-                <tr>
-                    <td>/guildcheck <span class="cmd-badge">GC</span></td>
-                    <td>Kiểm tra toàn bộ thành viên trong guild</td>
-                </tr>
-                <tr>
-                    <td>/alo <span class="cmd-badge">TTS</span></td>
-                    <td>Gửi tin nhắn TTS vào voice channel</td>
-                </tr>
-                <tr>
-                    <td>/coreadd <span class="cmd-badge">Bank</span></td>
-                    <td>Nộp core/bạc vào ngân quỹ</td>
-                </tr>
-                <tr>
-                    <td>/registertnc <span class="cmd-badge">GC</span></td>
-                    <td>Đăng ký IGN Albion Online</td>
-                </tr>
-            </table>
-        </div>
-    </section>
-
-    <!-- Footer -->
-    <footer>
-        <div class="footer-links">
-            <a href="https://github.com/namdzaixd-cpu/Bot_Albion_TNC" target="_blank">
-                <i class="fa-brands fa-github"></i> GitHub
-            </a>
-            <a href="https://albiononline.com" target="_blank">
-                <i class="fa-solid fa-gamepad"></i> Albion Online
-            </a>
-            <a href="https://discord.gg/PhMqCskBJ" target="_blank">
-                <i class="fa-brands fa-discord"></i> Discord
-            </a>
-        </div>
-        <p class="footer-copy">TNC Guild &copy; 2026. Thiết kế vận hành bởi Albion TNC Management.</p>
     </footer>
-
     <script>
-        // ─── PARTICLES ───
-        (function() {
-            const container = document.getElementById('particles');
-            const colors = [
-                'rgba(241,196,15,0.4)',
-                'rgba(231,76,60,0.3)',
-                'rgba(255,255,255,0.15)',
-                'rgba(52,152,219,0.2)',
-            ];
-            for (let i = 0; i < 40; i++) {
-                const el = document.createElement('div');
-                el.className = 'particle';
-                const size = 2 + Math.random() * 5;
-                el.style.setProperty('--size', size + 'px');
-                el.style.setProperty('--color', colors[Math.floor(Math.random() * colors.length)]);
-                el.style.setProperty('--duration', 8 + Math.random() * 14 + 's');
-                el.style.setProperty('--delay', Math.random() * 15 + 's');
-                el.style.setProperty('--max-opacity', (0.4 + Math.random() * 0.6).toFixed(2));
-                el.style.left = Math.random() * 100 + '%';
-                container.appendChild(el);
-            }
-        })();
+        (() => {
+            const search = document.getElementById("command-search");
+            const result = document.getElementById("command-result");
+            const rows = [...document.querySelectorAll("[data-command][data-system]")];
+            const filters = [...document.querySelectorAll("[data-command-filter]")];
+            let activeSystem = "all";
 
-        // ─── REVEAL ON SCROLL ───
-        (function() {
-            const observer = new IntersectionObserver((entries) => {
-                entries.forEach(entry => {
-                    if (entry.isIntersecting) {
-                        entry.target.classList.add('visible');
-                    }
+            const applyCommandFilter = () => {
+                const query = search.value.trim().toLocaleLowerCase("vi");
+                let visibleCount = 0;
+
+                rows.forEach((row) => {
+                    const matchesSystem = activeSystem === "all" || row.dataset.system === activeSystem;
+                    const matchesQuery = !query || row.textContent.toLocaleLowerCase("vi").includes(query);
+                    const visible = matchesSystem && matchesQuery;
+                    row.hidden = !visible;
+                    visibleCount += Number(visible);
                 });
-            }, { threshold: 0.15 });
 
-            document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
+                result.textContent = `${visibleCount} / ${rows.length} lệnh`;
+            };
+
+            search.addEventListener("input", applyCommandFilter);
+            filters.forEach((button) => {
+                button.addEventListener("click", () => {
+                    activeSystem = button.dataset.commandFilter;
+                    filters.forEach((item) => item.setAttribute("aria-pressed", String(item === button)));
+                    applyCommandFilter();
+                });
+            });
+
+            if ("IntersectionObserver" in window && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+                const revealTargets = document.querySelectorAll(
+                    ".problem-card, .module-card, .architecture-board, .workflow-card, .data-card, .stack-card"
+                );
+                const observer = new IntersectionObserver((entries, instance) => {
+                    entries.forEach((entry) => {
+                        if (entry.isIntersecting) {
+                            entry.target.classList.add("is-visible");
+                            instance.unobserve(entry.target);
+                        }
+                    });
+                }, { threshold: 0.12 });
+
+                revealTargets.forEach((target) => target.setAttribute("data-reveal", ""));
+                document.documentElement.classList.add("reveal-ready");
+                revealTargets.forEach((target) => observer.observe(target));
+            }
         })();
     </script>
 </body>
