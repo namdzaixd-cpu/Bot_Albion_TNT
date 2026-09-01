@@ -154,8 +154,9 @@ class UpdateTranslatorCog(commands.Cog):
         if message.channel not in channels:
             return
 
-        # Nếu là yêu cầu dịch (tag bot/user) thì xử lý riêng
-        if self.bot.user in message.mentions:
+        # Yêu cầu dịch: user reply 1 tin vào #update đã cấu hình + tag @Bot
+        # => bot tạo thread dính vào tin reply + dịch sang tiếng Việt.
+        if self.bot.user in message.mentions and message.reference:
             await self._handle_translate_request(message)
             return
 
@@ -190,10 +191,11 @@ class UpdateTranslatorCog(commands.Cog):
         await self._ensure_translation(message)
 
     async def _handle_translate_request(self, message: discord.Message):
-        """Tag bot trong #update: tìm message được reply (hoặc tin trên) và dịch."""
+        """Reply + tag @Bot trong kênh #update đã cấu hình:
+        tạo thread dính vào tin được reply + dịch nội dung sang tiếng Việt."""
         target = message.reference.resolved if message.reference else None
         if target is None:
-            # tìm message phía trên không phải bot, trong kênh
+            # reference không resolve được (đôi khi gateway trả None) → nhờ tin phía trên
             try:
                 async for m in message.channel.history(limit=20, before=message):
                     if not m.author.bot and m.content.strip():
@@ -202,12 +204,31 @@ class UpdateTranslatorCog(commands.Cog):
             except discord.Forbidden:
                 target = None
         if target is None:
-            await message.channel.send("🤔 Tôi không tìm thấy tin cập nhật nào để dịch ở phía trên.")
+            await message.reply("🤔 Tôi không tìm thấy tin cập nhật nào để dịch.")
             return
-        if message.channel not in self.target_channels(message.guild):
+
+        # Nếu reference chỉ còn DeletedReferencedMessage (tin đã bị xóa) → không có content
+        if not getattr(target, "content", ""):
+            await message.reply("❌ Tin được reply không tồn tại hoặc không có nội dung text để dịch.")
             return
-        # phản hồi tại chỗ tin nhắn tag (không tạo thread riêng)
-        await message.reply(await self._translate_and_post(target))
+
+        text = get_channel_text(target)
+        if not text:
+            await message.reply("❌ Tin này không có nội dung text để dịch.")
+            return
+
+        # tạo thread dính vào tin reply (nếu chưa có) + dịch
+        try:
+            thread = await self._get_or_create_thread(target, text)
+            translated = await self._translate(text)
+            if translated:
+                await self._post_to_thread(thread, translated)
+            guild_id = message.guild.id if message.guild else 0
+            link = f"https://discord.com/channels/{guild_id}/{thread.id}"
+            await message.reply(f"✅ Đã tạo thread **#{thread.name}** + bản dịch: {link}")
+        except Exception as e:  # noqa: BLE001
+            print(f"[UpdateTranslator] lỗi tạo thread khi tag bot: {e}")
+            await message.reply(f"❌ Lỗi khi tạo thread: `{e}`")
 
     async def _ensure_translation(self, message: discord.Message):
         """Đảm bảo message có 1 thread + bản dịch tiếng Việt. Idempotent."""

@@ -34,10 +34,13 @@ Tin mới trong #update
 
 - **React 🇻🇳** lên 1 tin trong #update → bot đảm bảo thread + bản dịch tồn tại
   (nếu tin là media-only vẫn tạo thread ghi chú, không có bản dịch).
-- **Tag bot** (vd `@Bot dịch tin này`):
-  - Nếu reply vào tin nào → dịch đúng tin đó.
-  - Nếu không reply → tìm tin không-phải-bot gần nhất phía trên.
-  - Post bản dịch reply vào chính tin tag (không đổi thread).
+- **Reply 1 tin + tag bot** (trong kênh #update đã cấu hình):
+  - Bot lấy tin được reply (`message.reference.resolved`).
+  - Bot **tạo thread dính vào tin reply** đó (`create_thread`) nếu chưa có.
+  - AI đặt tiêu đề + dịch nội dung → post bản dịch vào thread.
+  - Bot reply xác nhận kèm link thread.
+  - Nếu tin reply đã bị xóa / không có content → báo lỗi thân thiện.
+  - Nếu không reply (chỉ `@Bot` trần) → rơi xuống xử lý tin như message chính (#update).
 
 ## Điều kiện lọc message
 
