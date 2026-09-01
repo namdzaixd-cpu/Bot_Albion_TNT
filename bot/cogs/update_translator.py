@@ -118,7 +118,15 @@ class UpdateTranslatorCog(commands.Cog):
         return channels
 
     def lookup_channel(self, guild: discord.Guild, name: str) -> discord.TextChannel | None:
-        target = name.lower().lstrip("#")
+        target = name.strip()
+        # Nếu user dán ID channel hoặc link Discord hoặc mention <#ID>
+        import re
+        m = re.search(r"\d{15,20}", target)
+        if m:
+            ch = guild.get_channel(int(m.group(0)))
+            if isinstance(ch, discord.TextChannel):
+                return ch
+        target = target.lower().lstrip("#")
         for ch in guild.text_channels:
             if ch.name.lower() == target:
                 return ch
