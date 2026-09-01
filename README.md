@@ -30,6 +30,7 @@ web_dashboard/        Dashboard web Next.js (Discord OAuth2)
 | **GuildCheck** | `/registertnc`, `/registerfor`, `/myign`, `/guildconfig`, `/guildcheck`, `/unresolved`, `/newmembers [days]` | Đăng ký IGN Albion, tự kiểm tra qua Albion API xem còn trong guild không, tự xóa role nếu đã rời, `/newmembers` liệt kê member mới vào guild qua Discord API (0đ) |
 | **Alo (TTS)** | `/alojoin`, `/aloleave`, `/alonametoggle`, `/alo`, `/aloconfig`, `/alomute`, `/alounmute` | Đọc tin nhắn text thành giọng nói (gTTS) vào voice channel, tự rejoin khi rớt mạng |
 | **Core-Bank** | `/coresetup`, `/coreadd`, `/coreremove`, `/coreautoreact`, `/corelist` | Tự động thả emoji reaction lên ảnh core nộp vào kênh, quy đổi ra giá trị silver |
+| **Update Translator** | `/utconfig`, `/utstatus` | Tự tạo thread cho mỗi tin mới trong kênh `#update`, AI đặt tiêu đề + dịch sang tiếng Việt (Gemini), react 🇻🇳 để dịch lại tin cũ |
 | **AI Chatbot** | _(chạy trên bot riêng — xem [TNC-Chatbot](https://github.com/kudominer/TNC-Chatbot))_ | Tag bot AI để chat, `/wiki`, `/iteminfo`, tóm tắt kênh, learning |
 
 Phân quyền dựa theo **tên role Discord**: `officer`, `guild master`, `admin`, `phó hội`, `chủ hội`.

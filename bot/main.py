@@ -25,6 +25,7 @@ EXTENSIONS = [
     "cogs.corebank",
     "cogs.onboarding",
     "cogs.sync",
+    "cogs.update_translator",
 ]
 
 

@@ -57,6 +57,12 @@ FEATURE_FIELDS = [
         "`/corelist` (xem danh sách core)",
     ),
     (
+        "📢 Update Translator",
+        "Tự tạo thread + dịch tiếng Việt mỗi tin mới trong kênh `#update` (Gemini)\n"
+        "`/utconfig` (cấu hình kênh — Officer)\n"
+        "`/utstatus` (xem trạng thái cấu hình)",
+    ),
+    (
         "🧠 AI Chatbot",
         "🤖 Bot AI chạy trên **bot riêng** — tag bot AI trong kênh để chat\n"
         "Xoay vòng Ollama/Gemini/OpenRouter, hỗ trợ vision, tóm tắt kênh, RAG library\n"
