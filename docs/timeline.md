@@ -4,6 +4,19 @@ Nhật ký tiến độ và các mốc phát triển của dự án TNC Manager 
 
 ---
 
+## 📅 2026-09-22: Tối Ưu & Thu Gọn Luồng Apply Onboarding (In-Place Edit)
+- **Mục tiêu:** Khắc phục tình trạng thread apply bị dài và spam 3-4 Embed duplicate bằng việc cập nhật tại chỗ trên đúng 1 tin nhắn duy nhất.
+- **Thay đổi chính:**
+  - `bot/cogs/onboarding.py`:
+    - `RulesConfirmView`: Chuyển sang `interaction.response.edit_message()` để chuyển bước nộp đơn in-game.
+    - `ApplicantConfirmView`: Bỏ nút "Chưa gửi apply", edit tin nhắn cập nhật trạng thái chờ duyệt và chỉ gửi 1 dòng text ngắn ping Officer.
+    - `OfficerApprovalView`: Edit tin nhắn cập nhật kết quả duyệt (Xanh lá) hoặc từ chối (Đỏ).
+  - `docs/features/onboarding_streamline.md`: Tạo tài liệu luồng onboarding mới.
+  - `docs/tasks/2026-09-22_onboarding_streamline/`: Lưu trữ bộ task artifacts.
+- **Kết quả:** Code tối ưu, trải nghiệm apply mượt mà, thread gọn gàng.
+
+---
+
 ## 📅 2026-09-22: Tính năng Tra cứu & Đối soát Thành viên Guild In-Game (Albion Online)
 - **Mục tiêu:** Cho phép lấy dữ liệu danh sách thành viên Guild in-game từ SBI Official API, phân trang xem Fame và đối soát nhân sự In-game vs Server Discord.
 - **Thay đổi chính:**
@@ -25,11 +38,11 @@ Nhật ký tiến độ và các mốc phát triển của dự án TNC Manager 
 - Bot đang hoạt động với cấu trúc Discord.py gồm các Cogs: `about`, `alo_tts`, `blacklist`, `corebank`, `guildcheck`, `lastseen`, `massing`, `onboarding`, `siphoned`, `sync`, `update_translator`.
 - Dữ liệu lưu trữ qua Supabase (`bot/core/storage.py`).
 - Cụm tính năng AI Chat đã được tách sang repo riêng `TNC-Chatbot`.
-- Hệ thống `guildcheck.py` đã hoàn thiện đầy đủ các tính năng: cấu hình guild (`/guildconfig`), kiểm tra 1 player (`/guildcheck`), xem danh sách thành viên in-game (`/guildmembers`), đối soát nhân sự in-game vs discord (`/guildaudit`), và lọc thành viên mới (`/newmembers`).
+- Luồng Onboarding trong `bot/cogs/onboarding.py` đã được tối ưu hóa sang cơ chế In-Place Edit cực kỳ gọn gàng.
 
 ### 2. Bối cảnh & Dự định kế tiếp của user
-- User vừa yêu cầu bổ sung khả năng lấy dữ liệu thành viên guild in-game. Tính năng đã được triển khai hoàn chỉnh và an toàn theo chuẩn SBI API.
-- Sẵn sàng nhận các yêu cầu tiếp theo về quản trị guild, cập nhật UI web dashboard hoặc tối ưu thêm các cog khác.
+- User đã tối ưu xong cả 2 phần: Tra cứu thành viên In-game/Đối soát và Thu gọn luồng Onboarding.
+- Sẵn sàng tiếp tục hỗ trợ phát triển các tính năng quản lý guild, web dashboard hoặc các tiện ích khác theo yêu cầu.
 
 ### 3. Hướng dẫn kỹ thuật nhanh cho Agent tiếp theo
 - Khi chạy kiểm tra cú pháp: Dùng `python -m py_compile bot/cogs/*.py`.
