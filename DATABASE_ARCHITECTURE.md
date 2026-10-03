@@ -1,133 +1,82 @@
-# 🗄️ Kiến trúc Database — Bot TNC (Supabase)
+# Kiến trúc dữ liệu Bot TNC
 
-> Tài liệu này giải thích **tầng dữ liệu** của Bot TNC theo ngôn ngữ đơn giản,
-> dành cho người không chuyên backend. Sau đợt chuẩn hóa (commit `04df239`),
-> hệ thống đã được làm lại để **an toàn, ổn định và mượt mà**.
+## Backend và quyền truy cập
 
----
+Bot Python và Next.js API server dùng Supabase server-side. Browser gọi API dashboard đã xác thực; không nhận service-role key, bank token hoặc webhook secret. Thao tác ghi dashboard cần Discord user ID trong `ADMIN_DISCORD_IDS` ở cả proxy và route handler.
 
-## 1. Supabase là gì? (đơn giản)
+`SUPABASE_SERVICE_ROLE_KEY` là key backend được ưu tiên. Anon key không thay thế quyền backend: RLS/privileges không cho anon hoặc authenticated truy cập trực tiếp bảng vận hành. Thiếu cấu hình DB là lỗi rõ ràng, không phải kho dữ liệu rỗng.
 
-Supabase = một **kho dữ liệu online** (giống Google Sheet nhưng mạnh hơn).
-Bot và Web Dashboard đều đọc/ghi vào chung một kho này, nên:
-- Bot lưu cấu hình → Web Dashboard hiện ra ngay.
-- Web Dashboard đổi cài đặt → Bot nhận biết lập tức.
+## Python APIs
 
-Supabase có 2 "chìa khóa" (key):
-| Key | Dùng cho | Quyền |
-|-----|----------|-------|
-| **Service Role** | Backend (Bot + Server Web) | Toàn quyền, vượt qua mọi khóa |
-| **Anon** | Trình duyệt (Browser) | Bị giới hạn, chỉ xem được gì được cho phép |
+| Module | Contract |
+|---|---|
+| `bot/core/db.py` | `async_execute(builder)` chạy Supabase sync I/O ngoài event loop, trả `(response, error)`. Builder trả query chưa execute. Mutation mặc định một attempt; không retry khi kết quả chưa rõ. SELECT có retry/backoff; PostgREST client timeout 10 giây mỗi request. |
+| `bot/core/storage.py` | `load_json_async(path, default)` và `save_json_async(data, path)` cho runtime. Basename là `json_storage.file_name`; không đọc/ghi file JSON local. Default chỉ khi row không có; lỗi DB raise `DBError`. Save snapshot payload trước offload và raise nếu persist thất bại. |
+| `bot/core/config_store.py` | Async get/save; cached row được copy. Read lỗi không cache default; generation chặn in-flight read cũ phục hồi cache sau invalidate. Save invalidate cache sau persist, không mutate row authoritative trước commit. |
+| Sync APIs cùng module | Dành cho script thực ngoài event loop. Không gọi trong constructor/lifecycle/listener/command async của bot. |
 
-> ⚠️ **Quy tắc vàng:** Service Role là "chìa khóa master" — **tuyệt đối không** để lọt ra trình duyệt.
+Không còn `core.database` forwarding shim hoặc GitHub JSON-sync startup stub. Không đọc dữ liệu vận hành bằng `open()` hoặc gọi thẳng Supabase ngoài lớp dữ liệu tương ứng. `bot/Storage/` là legacy; không đặt test/log/file tạm vào đó.
 
----
+## Các bảng
 
-## 2. Kiến trúc tổng quan
+| Bảng | Vai trò |
+|---|---|
+| `guild_config` | Guild identity, onboarding channels/roles/toggle. |
+| `corebank_config` | Cấu hình CoreBank theo `DISCORD_GUILD_ID`; token chỉ backend. |
+| `core_credited` | Durable payment ledger: Officer, recipient/amount/emoji snapshot và trạng thái thanh toán/hoàn tác. |
+| `user_economy`, `sp_metadata`, `sp_transactions` | Tổng điểm, watermark và lịch sử SP; commit atomic trong RPC. |
+| `user_activity` | LastSeen; flush lỗi giữ dirty để retry. |
+| `alo_tts_config` | Cấu hình TTS. Queue runtime được gắn channel/session nguồn. |
+| `json_storage` | Party/template, GuildCheck, translator mapping và heartbeat theo file-name key. |
+| `discord_channels`, `discord_roles` | Danh mục Discord được Sync cập nhật. |
+| `system_logs` | Log bot; Overview/API logs đọc bảng này, không đọc bảng `logs` cũ. |
+| `blacklist` | `source_guild_id` tham chiếu guild; actor lấy từ session server-side. |
+| `ai_config`, `chat_history` | Contract lịch sử còn dùng bởi dashboard/helper; chatbot chạy repo riêng. Không tự chuyển dữ liệu giữa hai project. |
 
-```
-┌─────────────┐         ┌──────────────────┐         ┌──────────────┐
-│  Discord Bot │────────▶│   Supabase       │◀────────│  Web Dashboard│
-│  (Python)    │  ghi/đọc │   (Postgres)     │  đọc/ghi │  (Next.js)    │
-└─────────────┘         └──────────────────┘         └──────────────┘
-   dùng Service Role        ▲ bảng + RLS                  dùng Service Role
-                             │ (chỉ server)
-                        ❌ Anon bị KHÓA (deny all)
-```
+Không tạo `logs` hoặc `siphoned_energy` rỗng để làm query cũ hết lỗi: consumers dùng bảng producer thật.
 
-**Không có ai** truy cập DB trực tiếp từ trình duyệt — mọi thứ đi qua Server Web (API routes).
+## Core payments và kết quả chưa rõ
 
----
+Claim theo credit key unique và transition conditional atomic trong DB. Validate token/recipient trước claim; claim lỗi/duplicate không gửi thanh toán. Refund dùng amount/recipient snapshot, không dùng giá emoji hiện tại.
 
-## 3. Hai tầng code
+UnbelievaBoat PATCH là phép đổi balance bên ngoài transaction PostgreSQL. Không có bằng chứng contract idempotency key hoặc transaction-history endpoint trong API đã kiểm tra. Timeout, lỗi không xác định hoặc crash sau gửi có thể xảy ra sau khi balance đã đổi: không tự retry rồi cộng/trừ lần hai.
 
-### 🐍 Tầng Bot (Python) — `bot/core/`
-| File | Nhiệm vụ |
-|------|----------|
-| `db.py` | **Lớp kết nối chuẩn**. Có retry (thử lại 3 lần nếu mạng lỗi), ghi log rõ ràng, không bao giờ treo. |
-| `database.py` | Lớp cũ, giờ chỉ là "cầu nối" để code cũ không bị hỏng. |
-| `config_store.py` | **Cache thông minh**. Lưu config vào bộ nhớ, không cần query DB mỗi lần → nhanh gấp nhiều lần. |
-| `storage.py` | Lưu file JSON lên DB an toàn (có kiểm tra lỗi). |
-| `config.py` | Quản lý key & ID server. Bot dùng **Service Role**. |
+Ledger giữ `pending`/`unknown` hoặc `reverting`/`refund_unknown` khi chưa xác minh; record cũ không mặc định đã trả tiền. `scripts/corebank_reconcile.py` yêu cầu credit key, quyết định, actor và bằng chứng; legacy cần bổ sung guild, recipient, emoji key, tên và display snapshot. DB lưu actor/evidence/timestamp. Helper chỉ ghi kết quả đã kiểm chứng, không gọi bank API và không suy ra kết quả từ balance hiện tại.
 
-### 🌐 Tầng Web (TypeScript) — `web_dashboard/src/lib/`
-| File | Nhiệm vụ |
-|------|----------|
-| `supabaseServer.ts` | Client **Server-only** (Service Role). Chỉ dùng trong API routes. Lazy-init (không crash lúc build). |
-| `supabase.ts` | Client **Browser** (Anon). Dành cho component nếu cần. |
+## SP transaction và autosave
 
-> ✅ Đã kiểm tra: Service Role **không bị import** vào bất kỳ component client nào → key an toàn.
+SP import parse các dòng hợp lệ, không phụ thuộc thứ tự file. RPC lock watermark, cộng delta, ghi history và tiến watermark trong cùng transaction; failure rollback toàn bộ. Các lệnh chỉnh/reset điểm dùng cùng lock, không upsert whole snapshot cũ đè import concurrent.
 
----
+Dashboard PATCH chỉ gửi field thay đổi. Core emoji map dùng atomic per-key mutation; thay hai key khác nhau không mất nhau. Token không có trong PATCH nghĩa là giữ token đang lưu. UI serialize edits cùng page; persist thành công nhưng reload lỗi vẫn giữ trạng thái DB đã lưu và hiển thị chưa áp dụng.
 
-## 4. Các bảng dữ liệu
+## Reload và health
 
-(Tạo bởi `scripts/migration.sql`, bổ sung bởi `scripts/migration_security.sql`)
+- Bot/dashboard dùng cùng `DISCORD_GUILD_ID`, fallback `712258265769050164`; không dùng một biến `GUILD_ID` dashboard riêng.
+- Legacy CoreBank `default` được chuyển sang guild thật chỉ khi row guild thật chưa có; không overwrite row hiện có.
+- Server webhook dùng `Authorization: Bearer <WEBHOOK_SECRET>`; secret giống nhau trên deployments liên quan. Thiếu cấu hình fail-closed; thiếu/sai header không dispatch.
+- Persist thành công nhưng webhook lỗi được báo là đã lưu/chưa áp dụng, không báo đã áp dụng giả.
+- `applied: true` nghĩa là cả hai webhook đã nhận yêu cầu reload thành công, không phải ACK rằng mọi async listener đã đọc DB xong. Cần log/health của deployments để xác nhận áp dụng thực; listener gặp DB lỗi giữ cấu hình cũ.
+- Heartbeat online lấy gateway readiness hiện tại. `/api/bot-status` trả `{main_bot, chatbot}`; timestamp quá 90 giây là stale. Web service trả HTTP không đồng nghĩa bot kết nối Discord.
 
-| Bảng | Chứa gì |
-|------|---------|
-| `guild_config` | Cài đặt chung của guild (kênh apply, role officer...) |
-| `corebank_config` | Cấu hình hệ thống Core-Bank (kênh, token UnbelievaBoat) |
-| `blacklist` | Danh sách người bị cấm |
-| `siphoned_energy` | Năng lượng Siphoned |
-| `logs` | Nhật ký hoạt động (hiện ở dashboard "Hoạt động gần đây") |
-| `json_storage` | Kho JSON linh hoạt (key = tên file) |
-| `ai_config`, `user_activity`, `user_economy`, `alo_tts_config`, `sp_metadata` | Các module chuyên biệt |
+## Bootstrap và migration
 
-**Bảo mật thêm:**
-- Mọi bảng bật **RLS** (Row Level Security) → Anon bị từ chối hoàn toàn.
-- **Index** trên `guild_id` → tìm kiếm nhanh.
-- **Trigger** giới hạn `json_storage` ≤ 1MB → tránh phình to làm chậm hệ thống.
+Luồng hiện hành: `scripts/schema.sql` → sorted `scripts/migrations/*.sql` → `scripts/migration_security.sql`, trên một connection/transaction bằng `scripts/apply_schema.py`.
 
----
-
-## 5. Cách hoạt động thực tế (ví dụ)
-
-**Bro đổi "Bật module Onboarding" trên Web Dashboard:**
-1. Web gửi PATCH → API route (`config/route.ts`) dùng `supabaseServer` cập nhật `guild_config`.
-2. API gọi webhook báo Bot: "config đổi rồi!".
-3. Bot nhận tín hiệu → `config_store.reload_all()` xoá cache → lần sau đọc lấy giá trị mới.
-4. Bot bật/tắt module theo config mới.
-
-→ **Mượt mà, không cần restart bot.**
-
----
-
-## 6. Xử lý lỗi (Resilience)
-
-Nếu Supabase mạng chập chờn:
-- `db.py` **tự thử lại 3 lần** (nghỉ giãn cách tăng dần).
-- Nếu vẫn lỗi → trả về giá trị mặc định, bot **không crash**.
-- Mọi lỗi đều được **ghi log** để tra cứu sau.
-
----
-
-## 7. Dành cho dev (kỹ thuật)
-
-### Chạy test tầng DB (Python)
 ```bash
-python scripts/test_db_layer.py
-```
-→ Kiểm tra hệ thống không crash khi thiếu credential.
-
-### Build Web
-```bash
-cd web_dashboard && npm run build
+# Chỉ dùng connection của DB đã chọn có chủ đích. Không chạy để test production.
+python scripts/apply_schema.py
 ```
 
-### Áp dụng migration bảo mật
-Chạy file `scripts/migration_security.sql` trên Supabase SQL Editor
-(sau khi đã chạy `scripts/migration.sql`).
+Runner lấy `DIRECT_URL` hoặc `DATABASE_URL` từ environment, không đọc dotenv khi import, không split SQL bằng dấu `;`, không log connection string có password. Dependency: `psycopg[binary]` trong requirements. Thay đổi schema qua cơ chế SQL đã version hóa; `node scripts/db-exec.js "SQL_DDL"` vẫn là tiện ích DDL theo quy tắc repo khi chạy trên DB được cấp quyền.
 
----
+`scripts/migration.sql` là snapshot lịch sử chứa UPSERT số dư/watermark/config; **không áp file này để bootstrap/upgrade DB đang hoạt động**. `schema_v2.sql` là migration lịch sử, không nằm trong runner hiện hành. Không reset/truncate hoặc seed snapshot vận hành để migration xanh.
 
-## 8. Tóm tắt cho bro Kudo
+Bootstrap tạo đủ bảng trước FK/index/RLS/RPC. Upgrade additive giữ dữ liệu legacy; FK `NOT VALID` giữ orphan cũ mà vẫn kiểm tra writes mới. Cần đối soát orphan có chủ đích trước validate, không map nhãn nguồn thành guild ID giả. RLS và table privileges chỉ cho backend service role; RPC state-changing chỉ service-role execute.
 
-- ✅ Bot dùng **key đúng** (service role) → ghi config ổn định.
-- ✅ Web **không lộ key** ra trình duyệt.
-- ✅ Cache → dashboard **nhanh hơn**, bot **đỡ query DB**.
-- ✅ Tự retry → **ít lỗi** khi mạng yếu.
-- ✅ RLS + index + giới hạn size → **an toàn & hiệu năng tốt**.
+## Verification và rollout
 
-> Mọi truy cập DB giờ đi qua 1 đường chuẩn (`db.py` / `config_store.py` / `supabaseServer.ts`),
-> dễ bảo trì, dễ mở rộng. 🎯
+Tests Python chặn dotenv/outbound network trước import, không dùng credential máy thật. SQL được exercise trên PostgreSQL disposable UTF-8 bằng synthetic fixtures: empty bootstrap, legacy upgrade, reapply, rollback/concurrent operations và permissions. Không chạy Discord bot thật local.
+
+Rollout cần: backup hợp lệ → apply DDL additive đã verify → cấu hình `WEBHOOK_SECRET` giống nhau hai phía → deploy bot/dashboard tương ứng → kiểm tra production health/đường đã đổi. Không coi sửa source là đã deploy hoặc đã thu hồi credential.
+
+Credential từng hard-code trong `scripts/create_tables.py` phải rotate qua quyền quản trị provider nếu còn hiệu lực. Không in credential, không sửa lịch sử Git tự động, không overwrite dòng `.env`; thay đổi local env chỉ append và đồng bộ env example.

@@ -22,3 +22,4 @@ pynacl
 davey
 python-dotenv
 supabase==2.31.0
+psycopg[binary]>=3.2,<4

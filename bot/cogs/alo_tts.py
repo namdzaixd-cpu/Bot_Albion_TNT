@@ -10,7 +10,7 @@ from gtts import gTTS
 
 from core.config import DATA_DIR
 from core.permissions import is_officer
-from core.database import execute
+from core.db import async_execute
 
 # ==============================================================================
 # HỆ THỐNG TTS VOICE "ALO" (Bot join voice, đọc chat bằng giọng Google TTS)
@@ -22,33 +22,31 @@ CUSTOM_EMOJI_RE = re.compile(r"<a?:(\w+):\d+>")
 URL_RE = re.compile(r"https?://\S+")
 
 
-def load_tts_config():
+async def load_tts_config():
     data = {"read_name": {}, "rejoin": {}}
-    try:
-        resp, err = execute(lambda c: c.table("alo_tts_config").select("*").eq("id", 1))
-        if err:
-            print(f"Error loading alo_tts_config: {err}")
-        elif resp and resp.data:
-            row = resp.data[0]
-            data["read_name"] = row.get("read_name", {})
-            data["rejoin"] = row.get("rejoin", {})
-    except Exception as e:
-        print(f"Error loading alo_tts_config from Supabase: {e}")
+    response, error = await async_execute(
+        lambda client: client.table("alo_tts_config").select("*").eq("id", 1)
+    )
+    if error:
+        raise RuntimeError(f"Error loading alo_tts_config: {error}")
+    if response and response.data:
+        row = response.data[0]
+        data["read_name"] = row.get("read_name", {})
+        data["rejoin"] = row.get("rejoin", {})
     return data
 
 
-def save_tts_config(data):
-    try:
-        record = {
-            "id": 1,
-            "read_name": data.get("read_name", {}),
-            "rejoin": data.get("rejoin", {})
-        }
-        _, err = execute(lambda c: c.table("alo_tts_config").upsert(record))
-        if err:
-            print(f"Error saving alo_tts_config: {err}")
-    except Exception as e:
-        print(f"Error saving alo_tts_config to Supabase: {e}")
+async def save_tts_config(data):
+    record = {
+        "id": 1,
+        "read_name": data.get("read_name", {}),
+        "rejoin": data.get("rejoin", {}),
+    }
+    _, error = await async_execute(
+        lambda client: client.table("alo_tts_config").upsert(record)
+    )
+    if error:
+        raise RuntimeError(f"Error saving alo_tts_config: {error}")
 
 
 def clean_text_for_tts(message: discord.Message) -> str:
@@ -82,6 +80,7 @@ def generate_tts_file(text: str) -> str:
 class AloTtsCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
+        self._config_lock = asyncio.Lock()
         # voice_sessions[guild_id] = {"channel_id": int, "intentional_leave": bool}
         self.voice_sessions = {}
         # mute_state[guild_id] = True/False (tạm tắt tiếng đọc, bot vẫn ở lại voice)
@@ -93,34 +92,35 @@ class AloTtsCog(commands.Cog):
         # cờ đánh dấu đã chạy tự động vào lại voice sau khi khởi động (tránh reconnect storm khi gateway resume)
         self._startup_reconnect_done = False
 
-    async def enqueue_tts(self, guild: discord.Guild, text: str, author_name: str):
+    async def enqueue_tts(
+        self, guild: discord.Guild, text: str, author_name: str, source_channel_id: int
+    ):
         if not text or not text.strip():
             return
-        gid = guild.id
-        config = load_tts_config()
-        # Áp dụng chung cho toàn bộ server (guild)
-        read_name = config.get("read_name", {}).get(str(gid), True)
+        guild_id = guild.id
+        config = await load_tts_config()
+        read_name = config.get("read_name", {}).get(str(guild_id), True)
         full_text = f"{author_name} nói: {text}" if read_name else text
 
-        if gid not in self.tts_queues:
-            self.tts_queues[gid] = asyncio.Queue()
-        await self.tts_queues[gid].put(full_text)
+        if guild_id not in self.tts_queues:
+            self.tts_queues[guild_id] = asyncio.Queue()
+        await self.tts_queues[guild_id].put((source_channel_id, full_text))
 
-        if gid not in self.tts_workers or self.tts_workers[gid].done():
-            self.tts_workers[gid] = self.bot.loop.create_task(self._tts_worker(gid))
-
+        if guild_id not in self.tts_workers or self.tts_workers[guild_id].done():
+            self.tts_workers[guild_id] = self.bot.loop.create_task(self._tts_worker(guild_id))
+    
     async def _tts_worker(self, guild_id):
         queue = self.tts_queues[guild_id]
         while not queue.empty():
-            text = await queue.get()
+            source_channel_id, text = await queue.get()
             if self.mute_state.get(guild_id):
                 continue
             session = self.voice_sessions.get(guild_id)
-            if not session:
+            if not session or source_channel_id != session.get("channel_id"):
                 continue
             guild = self.bot.get_guild(guild_id)
             vc = guild.voice_client if guild else None
-            if not vc or not vc.is_connected():
+            if not vc or not vc.is_connected() or vc.channel.id != source_channel_id:
                 continue
 
             try:
@@ -142,11 +142,24 @@ class AloTtsCog(commands.Cog):
             try:
                 while vc.is_playing():
                     await asyncio.sleep(0.5)
+                current_session = self.voice_sessions.get(guild_id)
+                if (
+                    self.mute_state.get(guild_id)
+                    or not current_session
+                    or current_session.get("channel_id") != source_channel_id
+                    or not vc.is_connected()
+                    or vc.channel.id != source_channel_id
+                ):
+                    try:
+                        os.remove(path)
+                    except FileNotFoundError:
+                        pass
+                    continue
                 # Giới hạn tối đa 1 phút/đoạn bằng option ffmpeg "-t 60"
                 vc.play(discord.FFmpegPCMAudio(path, options="-t 60"), after=after_play)
                 await finished.wait()
-            except Exception as e:
-                print(f"❌ [ALO-TTS] Lỗi phát audio: {e}")
+            except Exception as error:
+                print(f"❌ [ALO-TTS] Lỗi phát audio: {error}")
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
@@ -157,14 +170,28 @@ class AloTtsCog(commands.Cog):
             if session and session.get("channel_id") == message.channel.id:
                 text = clean_text_for_tts(message)
                 if text:
-                    await self.enqueue_tts(message.guild, text, message.author.display_name)
+                    try:
+                        await self.enqueue_tts(
+                            message.guild, text, message.author.display_name, message.channel.id
+                        )
+                    except Exception as error:
+                        print(f"❌ [ALO-TTS] Không thể đọc cấu hình TTS: {error}")
 
     @commands.Cog.listener()
     async def on_voice_state_update(self, member, before, after):
-        """Xử lý tự động rejoin khi bot bị kick khỏi voice / rớt mạng."""
+        """Track bot moves and reconnect after unexpected disconnects."""
         if member.id != self.bot.user.id:
             return
         guild = member.guild
+
+        if before.channel is not None and after.channel is not None:
+            session = self.voice_sessions.get(guild.id)
+            if session and before.channel.id != after.channel.id:
+                session["channel_id"] = after.channel.id
+                voice_client = guild.voice_client
+                if voice_client and voice_client.is_playing():
+                    voice_client.stop()
+            return
 
         if before.channel is not None and after.channel is None:
             session = self.voice_sessions.get(guild.id)
@@ -174,8 +201,12 @@ class AloTtsCog(commands.Cog):
                 return
 
             channel_id = before.channel.id
-            rejoin_cfg = load_tts_config().get("rejoin", {})
-            if rejoin_cfg.get(str(channel_id)):
+            try:
+                config = await load_tts_config()
+            except Exception as error:
+                print(f"Error loading alo_tts_config for reconnect: {error}")
+                return
+            if config.get("rejoin", {}).get(str(channel_id)):
                 await asyncio.sleep(3)
                 channel = guild.get_channel(channel_id)
                 if channel:
@@ -183,8 +214,8 @@ class AloTtsCog(commands.Cog):
                         await channel.connect()
                         self.voice_sessions[guild.id] = {"channel_id": channel.id, "intentional_leave": False}
                         print(f"🔄 [ALO] Đã tự rejoin lại {channel.name}")
-                    except Exception as e:
-                        print(f"⚠️ [ALO] Rejoin thất bại: {e}")
+                    except Exception as error:
+                        print(f"⚠️ [ALO] Rejoin thất bại: {error}")
                         self.voice_sessions.pop(guild.id, None)
                 else:
                     self.voice_sessions.pop(guild.id, None)
@@ -205,7 +236,11 @@ class AloTtsCog(commands.Cog):
 
     async def _restore_voice_on_startup(self, retries: int = 6, delay: int = 8):
         await asyncio.sleep(delay)  # chờ gateway + cache kênh ổn định
-        config = load_tts_config()
+        try:
+            config = await load_tts_config()
+        except Exception as error:
+            print(f"Error loading alo_tts_config for startup reconnect: {error}")
+            return
         rejoin_cfg = config.get("rejoin", {})
         for channel_id_str, enabled in rejoin_cfg.items():
             if not enabled:
@@ -243,6 +278,7 @@ class AloTtsCog(commands.Cog):
         vc = guild.voice_client
 
         if vc and vc.channel.id == channel.id:
+            self.voice_sessions[guild.id] = {"channel_id": channel.id, "intentional_leave": False}
             return await interaction.response.send_message(f"✅ Bot đã ở **{channel.name}** rồi!", ephemeral=True)
 
         await interaction.response.defer(ephemeral=True)
@@ -270,34 +306,53 @@ class AloTtsCog(commands.Cog):
         self.voice_sessions[guild.id] = session
 
         channel_name = vc.channel.name
-        await vc.disconnect()
+        await interaction.response.defer(ephemeral=True)
+        try:
+            await vc.disconnect()
+        except Exception as error:
+            session["intentional_leave"] = False
+            return await interaction.followup.send(f"❌ Không thể rời voice: {error}", ephemeral=True)
         self.voice_sessions.pop(guild.id, None)
         self.mute_state.pop(guild.id, None)
-        await interaction.response.send_message(f"👋 Bot đã rời **{channel_name}**.", ephemeral=True)
+        await interaction.followup.send(f"👋 Bot đã rời **{channel_name}**.", ephemeral=True)
 
     @app_commands.command(name="alonametoggle", description="Bật/tắt đọc tên người gửi trước nội dung (áp dụng toàn server)")
     async def alonametoggle_cmd(self, interaction: discord.Interaction):
-        config = load_tts_config()
-        read_name_cfg = config.setdefault("read_name", {})
-        gid = str(interaction.guild.id)
-        current = read_name_cfg.get(gid, True)
-        read_name_cfg[gid] = not current
-        save_tts_config(config)
-        state = "BẬT ✅" if read_name_cfg[gid] else "TẮT ❌"
-        await interaction.response.send_message(f"🔊 Đọc tên người gửi: **{state}** (áp dụng cho toàn bộ server)", ephemeral=True)
+        await interaction.response.defer(ephemeral=True)
+        try:
+            async with self._config_lock:
+                config = await load_tts_config()
+                read_name = config.setdefault("read_name", {})
+                guild_id = str(interaction.guild.id)
+                read_name[guild_id] = not read_name.get(guild_id, True)
+                await save_tts_config(config)
+        except Exception as error:
+            return await interaction.followup.send(f"❌ Không thể cập nhật cấu hình: `{error}`", ephemeral=True)
+        state = "BẬT ✅" if read_name[guild_id] else "TẮT ❌"
+        await interaction.edit_original_response(
+            content=f"🔊 Đọc tên người gửi: **{state}** (áp dụng cho toàn bộ server)"
+        )
 
     @app_commands.command(name="alo", description="Gửi TTS vào 1 voice channel cụ thể mà không cần đang đứng trong đó")
     @app_commands.describe(voice="Voice channel bot đang có mặt", noi_dung="Nội dung muốn đọc")
     async def alo_cmd(self, interaction: discord.Interaction, voice: discord.VoiceChannel, noi_dung: str):
         guild = interaction.guild
-        vc = guild.voice_client
-        if not vc or vc.channel.id != voice.id:
-            return await interaction.response.send_message(f"❌ Bot chưa vào voice **{voice.name}**! Dùng `/alojoin` trước.", ephemeral=True)
+        voice_client = guild.voice_client
+        if not voice_client or voice_client.channel.id != voice.id:
+            return await interaction.response.send_message(
+                f"❌ Bot chưa vào voice **{voice.name}**! Dùng `/alojoin` trước.", ephemeral=True
+            )
         if self.mute_state.get(guild.id):
-            return await interaction.response.send_message("🔇 Bot đang bị mute ở voice này, dùng `/alounmute` trước.", ephemeral=True)
+            return await interaction.response.send_message(
+                "🔇 Bot đang bị mute ở voice này, dùng `/alounmute` trước.", ephemeral=True
+            )
 
-        await self.enqueue_tts(guild, noi_dung.strip(), interaction.user.display_name)
-        await interaction.response.send_message(f"📢 Đã gửi vào hàng chờ đọc ở **{voice.name}**!", ephemeral=True)
+        await interaction.response.defer(ephemeral=True)
+        try:
+            await self.enqueue_tts(guild, noi_dung.strip(), interaction.user.display_name, voice.id)
+        except Exception as error:
+            return await interaction.followup.send(f"❌ Không thể đọc cấu hình TTS: `{error}`", ephemeral=True)
+        await interaction.edit_original_response(content=f"📢 Đã gửi vào hàng chờ đọc ở **{voice.name}**!")
 
     @app_commands.command(name="aloconfig", description="Bật/tắt bot tự động ở lại voice (khi rớt mạng hoặc restart) — Officer")
     @app_commands.describe(rejoin="Bật/tắt tự động rejoin", voice="Voice channel cần config (mặc định = voice bot đang ở)")
@@ -311,17 +366,25 @@ class AloTtsCog(commands.Cog):
 
         target_channel = voice
         if not target_channel:
-            vc = interaction.guild.voice_client
-            if not vc:
+            voice_client = interaction.guild.voice_client
+            if not voice_client:
                 return await interaction.response.send_message("❌ Bot chưa ở voice nào, vui lòng chỉ định `voice:`!", ephemeral=True)
-            target_channel = vc.channel
+            target_channel = voice_client.channel
 
-        config = load_tts_config()
-        rejoin_cfg = config.setdefault("rejoin", {})
-        rejoin_cfg[str(target_channel.id)] = (rejoin.value == "on")
-        save_tts_config(config)
+        await interaction.response.defer(ephemeral=True)
+        try:
+            async with self._config_lock:
+                config = await load_tts_config()
+                rejoin_config = config.setdefault("rejoin", {})
+                rejoin_config[str(target_channel.id)] = rejoin.value == "on"
+                await save_tts_config(config)
+        except Exception as error:
+            return await interaction.followup.send(f"❌ Không thể cập nhật cấu hình: `{error}`", ephemeral=True)
         state = "BẬT ✅" if rejoin.value == "on" else "TẮT ❌"
-        await interaction.response.send_message(f"⚙️ Tự động rejoin cho **{target_channel.name}**: **{state}**", ephemeral=True)
+        await interaction.edit_original_response(
+            content=f"⚙️ Tự động rejoin cho **{target_channel.name}**: **{state}**"
+        )
+
 
     @app_commands.command(name="alomute", description="Tạm tắt tiếng đọc TTS ở voice hiện tại (bot vẫn ở lại)")
     async def alomute_cmd(self, interaction: discord.Interaction):

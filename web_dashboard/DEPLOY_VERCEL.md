@@ -13,7 +13,7 @@ Bot KHÔNG deploy lên Vercel được (serverless không giữ được websock
 ## ⚠️ BẢO MẬT — đã vá, nhưng PHẢI set đúng env
 
 Toàn bộ API dùng `SUPABASE_SERVICE_ROLE_KEY` (bypass RLS). Đã thêm:
-- `src/middleware.ts` — chốt chặn tập trung cho mọi `/api/*`
+- `src/proxy.ts` — yêu cầu đăng nhập cho mọi `/api/*`, admin cho các request ghi
 - Guard lớp 2 trong từng route ghi
 - Chặn UI `/dashboard` khi chưa đăng nhập
 
@@ -82,7 +82,13 @@ trường Production / Preview / Development):
 | `ADMIN_DISCORD_IDS` | `1064162008771084318` | **BẮT BUỘC** — ai được sửa data. Nhiều người ngăn bằng dấu phẩy |
 | `BOT_WEBHOOK_URL` | `https://<bot-tren-render>.onrender.com/api/webhook/reload` | không phải 127.0.0.1 |
 | `CHATBOT_WEBHOOK_URL` | `https://<chatbot-tren-render>.onrender.com/api/webhook/reload` | bot AI riêng |
-| `NEXT_PUBLIC_API_URL` | `https://<ten-project>.vercel.app` | |
+| `WEBHOOK_SECRET` | cùng một giá trị bí mật trên dashboard và bot | **BÍ MẬT** — không dùng `NEXT_PUBLIC_`; bắt buộc để dashboard gửi reload đã xác thực |
+
+Trong cả hai dịch vụ Bot/Chatbot trên Render, đặt cùng giá trị `WEBHOOK_SECRET`
+như Vercel. Webhook từ dashboard gửi giá trị này trong header
+`Authorization: Bearer ...`; biến không bao giờ xuất hiện trong client bundle.
+Nếu thiếu secret, thiếu URL đích hoặc bot trả lỗi, API báo `saved: true` nhưng
+`applied: false` (HTTP 502). Cần kiểm tra cấu hình/reload trước khi xem là đã áp dụng.
 
 Bấm **Deploy**. Build xong Vercel cấp domain -> quay lại bước 1.3 thêm
 redirect URI thật, và sửa lại `NEXTAUTH_URL` nếu lúc đầu đoán sai tên.
@@ -93,8 +99,8 @@ Sau khi sửa env phải **Redeploy** thì mới có hiệu lực.
 
 - [ ] Mở `https://<ten>.vercel.app` -> landing page hiện đủ 7 feature card
 - [ ] Mở `/dashboard` -> sidebar 7 module hiện ra
-- [ ] `curl https://<ten>.vercel.app/api/discord-data` -> trả JSON channels (Supabase ok)
 - [ ] Bấm **Login** -> nhảy sang Discord -> quay về không lỗi `redirect_uri_mismatch`
+- [ ] Sau khi đăng nhập, mở `/dashboard` và xác nhận API cùng origin tải channels/overview
 - [ ] Xem tab **Logs** trên Vercel nếu có lỗi 500
 
 Lỗi thường gặp:
@@ -103,17 +109,16 @@ Lỗi thường gặp:
 - API trả rỗng -> thiếu `SUPABASE_SERVICE_ROLE_KEY` trên Vercel
 - Build fail ngay -> Root Directory chưa trỏ `web_dashboard`
 
-## 6. Vá bảo mật (nên làm trước khi công khai URL)
+## 6. Webhook reload có xác thực
 
-Ý tưởng: chặn `PATCH /api/config` và trang `/dashboard` cho người lạ.
-
-1. Tách config NextAuth ra file dùng chung, thêm callback lưu `token.sub`.
-2. Trong `PATCH` của `src/app/api/config/route.ts`, gọi `getServerSession()`;
-   nếu không có session hoặc `session.user.id` không nằm trong danh sách
-   officer -> trả `401`.
-3. Thêm biến env `ADMIN_DISCORD_IDS=id1,id2` để quy định ai được sửa.
-4. Trong `src/app/dashboard/page.tsx`, nếu `useSession()` trả
-   `status === "unauthenticated"` -> hiện nút đăng nhập thay vì form.
+1. Tạo một secret ngẫu nhiên riêng, ví dụ `openssl rand -base64 32`.
+2. Đặt cùng giá trị vào `WEBHOOK_SECRET` trên Vercel, dịch vụ Bot Render và
+   dịch vụ Chatbot Render.
+3. Giữ `BOT_WEBHOOK_URL` và `CHATBOT_WEBHOOK_URL` là URL HTTPS thật của từng
+   dịch vụ; không đưa secret vào URL hoặc biến `NEXT_PUBLIC_*`.
+4. Các route lưu config sẽ chờ webhook phản hồi. Nếu webhook lỗi, cấu hình đã
+   lưu nhưng response báo rõ `applied: false`; sửa env/kết nối rồi thực hiện
+   lại thay đổi hoặc yêu cầu bot reload trước khi kết luận đã áp dụng.
 
 ## 7. Giới hạn của Vercel free cần biết
 

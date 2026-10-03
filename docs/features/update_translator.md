@@ -52,7 +52,7 @@ Tin mới trong #update
 
 ## Lưu trữ (Supabase json_storage)
 
-Key config: **`tnc_updatetranslator_v1.json`** (qua `load_json()`/`save_json()`).
+Key config: **`tnc_updatetranslator_v1.json`** (qua `load_json_async()`/`save_json_async()`).
 
 ```json
 {
@@ -101,12 +101,13 @@ Giao diện `/utstatus`:
   → Cập nhật: Bot vẫn tạo thread cho tin media-only với ghi chú `[Không có nội dung text...]` nếu
   được react 🇻🇳 yêu cầu; còn tin tự động mới thì bỏ qua hoàn toàn tin không có text.
 - **Nội dung > 2000 ký tự**: cắt theo dòng, post nhiều message, đánh số thứ tự tự nhiên.
-- **Trùng lặp**: kiểm tra `threads[message_id]` trước khi tạo thread → idempotent.
-- **Chạy trùng (gateway lặp)**: `self.in_progress` set chống xử lý đồng thời cùng 1 message.
+- **Mapping có nhưng cache miss**: fetch `thread_id`; thread archived được mở lại và tái sử dụng. Lỗi quyền/transport không bị coi là thread đã xóa.
+- **Chạy đồng thời**: khóa riêng theo `message_id` ngăn tạo hai thread; khóa config chung giữ các mapping/kênh vừa cập nhật khi nhiều tin hoặc `/utconfig` cùng lưu.
+- **Storage lỗi**: load/save lỗi được báo rõ, không persist default đè mapping cũ. `/utconfig` và `/utstatus` ACK trước I/O.
 
 ## Tuân thủ dự án
 
-- Lưu trữ qua `load_json`/`save_json` — không `open()` thuần.
+- Lưu trữ qua `load_json_async`/`save_json_async` — không `open()` thuần, không chặn event loop.
 - Không đụng `.env` (dùng key có sẵn).
 - Không thêm dependency mới.
 - Mọi kết nối ngoài bọc try-except (quy tắc CI).

@@ -3,7 +3,8 @@ import asyncio
 import traceback
 import aiohttp
 from datetime import datetime
-from core.database import execute
+from core.db import async_execute
+from core.config import GUILD_ID
 import os
 
 LOG_WEBHOOK_URL = os.getenv("LOG_WEBHOOK_URL", "")
@@ -47,7 +48,8 @@ class SystemLogger:
         cls.log_queue.append({
             "level": level,
             "module": module,
-            "message": message
+            "message": message,
+            "guild_id": str(GUILD_ID),
         })
 
     @classmethod
@@ -71,7 +73,7 @@ class SystemLogger:
             
             try:
                 # Gửi theo mảng để tối ưu API call
-                _, err = execute(lambda c: c.table("system_logs").insert(batch))
+                _, err = await async_execute(lambda c: c.table("system_logs").insert(batch))
                 if err:
                     # Không print ở đây để tránh infinite loop qua interceptor
                     pass

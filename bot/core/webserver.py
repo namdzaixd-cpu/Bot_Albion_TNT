@@ -1,9 +1,10 @@
+import hmac
 import os
 from threading import Thread
 
-from flask import Flask
+from flask import Flask, request
 
-from .config import BOT_SESSION_ID
+from .config import BOT_SESSION_ID, WEBHOOK_SECRET
 
 # ==============================================================================
 # WEB SERVER FLASK (TREO BOT ONLINE TRÊN RENDER)
@@ -34,6 +35,12 @@ def _run():
 @app.route("/api/webhook/reload", methods=["POST"])
 def webhook_reload():
     global bot_instance
+    if not WEBHOOK_SECRET:
+        return {"status": "error", "message": "Webhook authentication not configured"}, 503
+    expected = f"Bearer {WEBHOOK_SECRET}".encode("utf-8")
+    supplied = request.headers.get("Authorization", "").encode("utf-8")
+    if not hmac.compare_digest(supplied, expected):
+        return {"status": "error", "message": "Unauthorized"}, 401
     if bot_instance:
         try:
             bot_instance.loop.call_soon_threadsafe(bot_instance.dispatch, "config_reload")

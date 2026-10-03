@@ -2,8 +2,8 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { supabase } from "@/lib/supabaseServer";
 import { authOptions, isAdmin } from "@/lib/auth";
-
-const GUILD_ID = process.env.DISCORD_GUILD_ID || process.env.GUILD_ID || "default";
+import { GUILD_ID } from "@/lib/guild";
+import { reloadBots } from "@/lib/reloadBots";
 
 /**
  * Bật/tắt TOÀN BỘ module cùng lúc (công tắc tổng).
@@ -14,12 +14,12 @@ const GUILD_ID = process.env.DISCORD_GUILD_ID || process.env.GUILD_ID || "defaul
  * config, nên không bao giờ ghi nhầm sang cột khác.
  */
 export async function PATCH(request: Request) {
-  // ── Lớp bảo vệ 2 (proxy.ts đã chặn ở vòng ngoài) ───────────────────
   const session = await getServerSession(authOptions);
   if (!session) {
     return NextResponse.json({ error: "Chưa đăng nhập" }, { status: 401 });
   }
-  if (!isAdmin((session.user as { id?: string }).id)) {
+  const user = session.user as { id?: string };
+  if (!isAdmin(user.id)) {
     return NextResponse.json(
       { error: "Bạn không có quyền quản trị" },
       { status: 403 }
@@ -27,16 +27,21 @@ export async function PATCH(request: Request) {
   }
 
   try {
-    const body = await request.json();
-    if (typeof body?.enabled !== "boolean") {
+    const body: unknown = await request.json();
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
       return NextResponse.json(
         { error: "Thiếu trường 'enabled' (true/false)" },
         { status: 400 }
       );
     }
-    const enabled: boolean = body.enabled;
+    const enabled = Reflect.get(body, 'enabled');
+    if (typeof enabled !== 'boolean') {
+      return NextResponse.json(
+        { error: "Thiếu trường 'enabled' (true/false)" },
+        { status: 400 }
+      );
+    }
 
-    // Đọc hàng config hiện tại để biết CÓ những cột nào
     const { data: row, error: readErr } = await supabase
       .from("guild_config")
       .select("*")
@@ -51,7 +56,7 @@ export async function PATCH(request: Request) {
       );
     }
 
-    const keys = Object.keys(row).filter((k) => /^is_.+_enabled$/.test(k));
+    const keys = Object.keys(row).filter((key) => /^is_.+_enabled$/.test(key));
     if (keys.length === 0) {
       return NextResponse.json(
         { error: "Không tìm thấy module nào để bật/tắt" },
@@ -60,23 +65,37 @@ export async function PATCH(request: Request) {
     }
 
     const patch: Record<string, boolean> = {};
-    for (const k of keys) patch[k] = enabled;
+    for (const key of keys) patch[key] = enabled;
 
-    const { error: upErr } = await supabase
+    const { data: updatedRow, error: updateError } = await supabase
       .from("guild_config")
       .update(patch)
-      .eq("guild_id", GUILD_ID);
-
-    if (upErr) throw upErr;
-
-    return NextResponse.json({
+      .eq("guild_id", GUILD_ID)
+      .select("guild_id")
+      .maybeSingle();
+    if (updateError) throw updateError;
+    if (!updatedRow) {
+      return NextResponse.json(
+        { error: "Không thể xác nhận cấu hình guild đã được lưu." },
+        { status: 404 }
+      );
+    }
+    const result = {
       success: true,
       enabled,
       updated: keys,
       count: keys.length,
-    });
+    };
+    const reload = await reloadBots();
+    if (!reload.ok) {
+      return NextResponse.json(
+        { ...result, saved: true, applied: false, error: reload.error },
+        { status: 502 }
+      );
+    }
+    return NextResponse.json({ ...result, saved: true, applied: true });
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : "Lỗi không xác định";
-    return NextResponse.json({ error: msg }, { status: 500 });
+    const message = err instanceof Error ? err.message : "Lỗi không xác định";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

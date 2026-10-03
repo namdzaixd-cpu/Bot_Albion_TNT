@@ -1,8 +1,7 @@
 import discord
 from discord.ext import commands
 from core.config import GUILD_ID
-from core.database import execute
-
+from core.db import async_execute
 class Sync(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -16,7 +15,7 @@ class Sync(commands.Cog):
                 "guild_id": str(channel.guild.id)
             }
             # Supabase upsert uses the primary key 'id' to resolve conflicts
-            _, err = execute(lambda c: c.table("discord_channels").upsert(data))
+            _, err = await async_execute(lambda c: c.table("discord_channels").upsert(data))
             if err:
                 print(f"Error upserting channel {channel.name}: {err}")
         except Exception as e:
@@ -24,7 +23,7 @@ class Sync(commands.Cog):
 
     async def _delete_channel(self, channel_id: int):
         try:
-            _, err = execute(lambda c: c.table("discord_channels").delete().eq("id", str(channel_id)))
+            _, err = await async_execute(lambda c: c.table("discord_channels").delete().eq("id", str(channel_id)))
             if err:
                 print(f"Error deleting channel {channel_id}: {err}")
         except Exception as e:
@@ -38,7 +37,7 @@ class Sync(commands.Cog):
                 "color": str(role.color),
                 "guild_id": str(role.guild.id)
             }
-            _, err = execute(lambda c: c.table("discord_roles").upsert(data))
+            _, err = await async_execute(lambda c: c.table("discord_roles").upsert(data))
             if err:
                 print(f"Error upserting role {role.name}: {err}")
         except Exception as e:
@@ -46,7 +45,7 @@ class Sync(commands.Cog):
 
     async def _delete_role(self, role_id: int):
         try:
-            _, err = execute(lambda c: c.table("discord_roles").delete().eq("id", str(role_id)))
+            _, err = await async_execute(lambda c: c.table("discord_roles").delete().eq("id", str(role_id)))
             if err:
                 print(f"Error deleting role {role_id}: {err}")
         except Exception as e:
@@ -59,7 +58,7 @@ class Sync(commands.Cog):
         if guild:
             # Upsert Guild Config trước để tránh lỗi Foreign Key
             try:
-                _, err = execute(lambda c: c.table("guild_config").upsert(
+                _, err = await async_execute(lambda c: c.table("guild_config").upsert(
                     {"guild_id": str(guild.id)}, on_conflict="guild_id"))
                 if err:
                     print(f"Lỗi khi tạo guild_config trong sync: {err}")

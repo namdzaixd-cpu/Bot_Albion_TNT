@@ -1,23 +1,50 @@
-import os
-import json
-from dotenv import load_dotenv
-from supabase import create_client, Client
+"""Initialize ALO TTS config from an explicitly selected offline snapshot."""
 
-load_dotenv()
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASE_ANON_KEY")
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+import argparse
 
-DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bot", "Storage")
-filepath = os.path.join(DATA_DIR, "tnc_tts_config_v1.json")
-if os.path.exists(filepath):
-    with open(filepath, 'r', encoding='utf-8') as f:
-        data = json.load(f)
-        record = {
+from _legacy_snapshot import (
+    create_supabase_client,
+    read_snapshot_json,
+    resolve_snapshot_dir,
+)
+
+
+SOURCE_FILE = "tnc_tts_config_v1.json"
+
+
+def import_snapshot(data: dict, client) -> None:
+    client.table("alo_tts_config").upsert(
+        {
             "id": 1,
             "read_name": data.get("read_name", {}),
             "rejoin": data.get("rejoin", {}),
-            "afk": data.get("afk", {})
-        }
-        supabase.table("alo_tts_config").upsert(record).execute()
-        print("Migrated alo_tts_config successfully.")
+            "afk": data.get("afk", {}),
+        },
+        on_conflict="id",
+        ignore_duplicates=True,
+    ).execute()
+
+def main(argv=None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--legacy-snapshot-dir",
+        required=True,
+        help="Directory containing an offline export; bot/Storage is protected and rejected.",
+    )
+    args = parser.parse_args(argv)
+
+    try:
+        snapshot_dir = resolve_snapshot_dir(args.legacy_snapshot_dir)
+        data = read_snapshot_json(snapshot_dir, SOURCE_FILE)
+        client = create_supabase_client()
+        import_snapshot(data, client)
+    except Exception as exc:
+        print(f"ALO TTS config import failed ({type(exc).__name__}).")
+        return 1
+
+    print("Initialized ALO TTS config from the selected offline snapshot.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

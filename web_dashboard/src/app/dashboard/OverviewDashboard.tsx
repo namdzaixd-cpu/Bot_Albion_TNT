@@ -7,6 +7,79 @@ import StatusBadge from "./StatusBadge";
 type Activity = { time: string; event: string; module: string; status: string };
 type ModuleState = { key: string; id: string; enabled: boolean };
 
+type OverviewData = {
+  stats: {
+    members: number | null;
+    members_live: boolean;
+    corebank_total: number;
+    blacklist_count: number;
+    ai_today: number;
+  };
+  modules: ModuleState[];
+  activity: Activity[];
+};
+
+function parseOverviewData(value: unknown): OverviewData | null {
+  if (
+    !value || typeof value !== 'object' ||
+    !('stats' in value) || !('modules' in value) || !('activity' in value)
+  ) return null;
+
+  const rawStats = value.stats;
+  if (!rawStats || typeof rawStats !== 'object' || Array.isArray(rawStats)) return null;
+  const members = Reflect.get(rawStats, 'members');
+  let memberCount: number | null = null;
+  if (members !== null) {
+    if (typeof members !== 'number' || !Number.isFinite(members)) return null;
+    memberCount = members;
+  }
+  const membersLive = Reflect.get(rawStats, 'members_live');
+  const corebankTotal = Reflect.get(rawStats, 'corebank_total');
+  const blacklistCount = Reflect.get(rawStats, 'blacklist_count');
+  const aiToday = Reflect.get(rawStats, 'ai_today');
+  if (typeof membersLive !== 'boolean') return null;
+  if (typeof corebankTotal !== 'number' || !Number.isFinite(corebankTotal)) return null;
+  if (typeof blacklistCount !== 'number' || !Number.isFinite(blacklistCount)) return null;
+  if (typeof aiToday !== 'number' || !Number.isFinite(aiToday)) return null;
+  if (!Array.isArray(value.modules) || !Array.isArray(value.activity)) return null;
+
+  const modules: ModuleState[] = [];
+  for (const rawModule of value.modules) {
+    if (!rawModule || typeof rawModule !== 'object' || Array.isArray(rawModule)) return null;
+    const key = Reflect.get(rawModule, 'key');
+    const id = Reflect.get(rawModule, 'id');
+    const enabled = Reflect.get(rawModule, 'enabled');
+    if (typeof key !== 'string' || typeof id !== 'string' || typeof enabled !== 'boolean') return null;
+    modules.push({ key, id, enabled });
+  }
+
+  const activity: Activity[] = [];
+  for (const rawEntry of value.activity) {
+    if (!rawEntry || typeof rawEntry !== 'object' || Array.isArray(rawEntry)) return null;
+    const time = Reflect.get(rawEntry, 'time');
+    const event = Reflect.get(rawEntry, 'event');
+    const module = Reflect.get(rawEntry, 'module');
+    const status = Reflect.get(rawEntry, 'status');
+    if (
+      typeof time !== 'string' || typeof event !== 'string' ||
+      typeof module !== 'string' || typeof status !== 'string'
+    ) return null;
+    activity.push({ time, event, module, status });
+  }
+
+  return {
+    stats: {
+      members: memberCount,
+      members_live: membersLive,
+      corebank_total: corebankTotal,
+      blacklist_count: blacklistCount,
+      ai_today: aiToday,
+    },
+    modules,
+    activity,
+  };
+}
+
 /** Tên tiếng Việt cho từng module; chưa có thì tự chuyển từ id. */
 const MODULE_LABELS: Record<string, string> = {
   onboard: "Recruiter (Onboarding)",
@@ -80,38 +153,51 @@ function StatCard({ label, value, sub, icon: Icon, color, raw }: {
 }
 
 export default function OverviewDashboard() {
-  const [stats, setStats] = useState<{
-    members: number | null; members_live: boolean;
-    corebank_total: number; blacklist_count: number; ai_today: number;
-  }>({ members: null, members_live: false, corebank_total: 0, blacklist_count: 0, ai_today: 0 });
+  const [stats, setStats] = useState<OverviewData['stats']>({
+    members: null,
+    members_live: false,
+    corebank_total: 0,
+    blacklist_count: 0,
+    ai_today: 0,
+  });
   const [modules, setModules] = useState<ModuleState[]>([]);
   const [activity, setActivity] = useState<Activity[]>([]);
   const [loading, setLoading] = useState(true);
-
-  const load = async () => {
-    try {
-      const res = await fetch("/api/overview");
-      if (res.ok) {
-        const d = await res.json();
-        setStats(d.stats);
-        setModules(d.modules ?? []);
-        setActivity(d.activity);
-      }
-    } catch { }
-  };
+  const [error, setError] = useState('');
 
   useEffect(() => {
     let mounted = true;
-    const run = async () => {
-      await load();
-      if (mounted) setLoading(false);
+    const load = async () => {
+      try {
+        const response = await fetch("/api/overview", { cache: "no-store" });
+        const payload: unknown = await response.json().catch(() => null);
+        if (!response.ok) {
+          const message = payload && typeof payload === 'object' && 'error' in payload &&
+            typeof payload.error === 'string' ? payload.error : 'Không thể tải dữ liệu tổng quan.';
+          throw new Error(message);
+        }
+        const overview = parseOverviewData(payload);
+        if (!overview) throw new Error('Dữ liệu tổng quan không hợp lệ.');
+        if (!mounted) return;
+        setStats(overview.stats);
+        setModules(overview.modules);
+        setActivity(overview.activity);
+        setError('');
+      } catch (reason: unknown) {
+        if (!mounted) return;
+        setError(reason instanceof Error ? reason.message : 'Không thể tải dữ liệu tổng quan.');
+        setModules([]);
+        setActivity([]);
+      } finally {
+        if (mounted) setLoading(false);
+      }
     };
-    run();
-    const iv = setInterval(() => { if (mounted) load(); }, 15000);
-    return () => { mounted = false; clearInterval(iv); };
+    load();
+    const interval = setInterval(load, 15_000);
+    return () => { mounted = false; clearInterval(interval); };
   }, []);
 
-  const onCount = modules.filter((m) => m.enabled).length;
+  const onCount = modules.filter((module) => module.enabled).length;
 
   return (
     <div className="space-y-8 animate-fade-in relative z-10">
@@ -141,6 +227,12 @@ export default function OverviewDashboard() {
           </div>
         </div>
       </div>
+      {error && (
+        <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-300" role="alert">
+          {error}
+        </div>
+      )}
+
 
       {/* Thành viên + Module */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
@@ -173,6 +265,8 @@ export default function OverviewDashboard() {
                 <div key={i} className="h-10 rounded-xl bg-[rgba(139,156,255,.08)] animate-pulse" />
               ))}
             </div>
+          ) : error ? (
+            <div className="text-center py-6 text-sm text-rose-300">Không thể xác nhận trạng thái module.</div>
           ) : modules.length === 0 ? (
             <div className="text-center py-6 text-sm" style={{ color: "#8b8499" }}>
               Chưa có module nào trong cấu hình.
@@ -221,6 +315,8 @@ export default function OverviewDashboard() {
         </div>
         {loading ? (
           <div className="space-y-3">{[1, 2, 3].map((i) => <div key={i} className="h-12 rounded-xl bg-[rgba(139,156,255,.08)] animate-pulse" />)}</div>
+        ) : error ? (
+          <div className="text-center py-12 text-rose-300">Không thể tải hoạt động gần đây.</div>
         ) : activity.length === 0 ? (
           <div className="text-center py-12" style={{ color: "#8b8499" }}>
             <div className="text-4xl mb-3 opacity-50">📡</div>

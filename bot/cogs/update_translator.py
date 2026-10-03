@@ -1,4 +1,6 @@
 import os
+import asyncio
+import weakref
 
 import discord
 from discord import app_commands
@@ -7,7 +9,7 @@ import aiohttp
 
 from core.config import STORAGE_DIR, GEMINI_API_KEY
 from core.permissions import is_officer
-from core.storage import load_json, save_json
+from core.storage import load_json_async, save_json_async
 
 # ==============================================================================
 # HỆ THỐNG: TỰ ĐỘNG TẠO THREAD + DỊCH KÊNH #UPDATE (Gemini)
@@ -22,12 +24,12 @@ CONFIG_FILE = os.path.join(STORAGE_DIR, "tnc_updatetranslator_v1.json")
 CONFIG_DEFAULT = lambda: {"enabled": True, "channel_ids": []}
 
 
-def load_config():
-    return load_json(CONFIG_FILE, CONFIG_DEFAULT)
+async def load_config():
+    return await load_json_async(CONFIG_FILE, CONFIG_DEFAULT)
 
 
-def save_config(data):
-    save_json(data, CONFIG_FILE)
+async def save_config(data):
+    return await save_json_async(data, CONFIG_FILE)
 
 
 GEMINI_URL = (
@@ -98,23 +100,22 @@ def split_message(text: str, limit: int = MAX_MSG_LEN) -> list[str]:
 class UpdateTranslatorCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-        # in_progress[message_id] = True — chống chạy trùng (gateway có thể gửi lặp)
         self.in_progress = set()
+        self._thread_locks = weakref.WeakValueDictionary()
+        self._config_lock = asyncio.Lock()
 
-    # ============================================================
-    # Utils
-    # ============================================================
-    def target_channels(self, guild: discord.Guild) -> list[discord.TextChannel]:
-        """Trả danh sách TextChannel trong guild mà tính năng đang bật."""
-        cfg = load_config()
+    def _thread_lock(self, message_id):
+        return self._thread_locks.setdefault(message_id, asyncio.Lock())
+
+    async def target_channels(self, guild: discord.Guild) -> list[discord.TextChannel]:
+        cfg = await load_config()
         if not cfg.get("enabled"):
             return []
-        ids = cfg.get("channel_ids") or []
         channels = []
-        for cid in ids:
-            ch = guild.get_channel(cid)
-            if isinstance(ch, discord.TextChannel):
-                channels.append(ch)
+        for channel_id in cfg.get("channel_ids") or []:
+            channel = guild.get_channel(int(channel_id))
+            if isinstance(channel, discord.TextChannel):
+                channels.append(channel)
         return channels
 
     def lookup_channel(self, guild: discord.Guild, name: str) -> discord.TextChannel | None:
@@ -150,7 +151,11 @@ class UpdateTranslatorCog(commands.Cog):
         if message.content.startswith(("!", ".")):
             return
 
-        channels = self.target_channels(message.guild)
+        try:
+            channels = await self.target_channels(message.guild)
+        except Exception as error:
+            print(f"[UpdateTranslator] không đọc được cấu hình: {error}")
+            return
         if message.channel not in channels:
             return
 
@@ -159,8 +164,10 @@ class UpdateTranslatorCog(commands.Cog):
         if self.bot.user in message.mentions and message.reference:
             await self._handle_translate_request(message)
             return
-
-        await self._auto_process(message)
+        try:
+            await self._auto_process(message)
+        except Exception as error:
+            print(f"[UpdateTranslator] không xử lý được message {message.id}: {error}")
 
     @commands.Cog.listener()
     async def on_raw_reaction_add(self, payload: discord.RawReactionActionEvent):
@@ -170,7 +177,12 @@ class UpdateTranslatorCog(commands.Cog):
         if not isinstance(channel, discord.TextChannel):
             return
         guild = channel.guild
-        if channel not in self.target_channels(guild):
+        try:
+            channels = await self.target_channels(guild)
+        except Exception as error:
+            print(f"[UpdateTranslator] không đọc được cấu hình: {error}")
+            return
+        if channel not in channels:
             return
         try:
             msg = await channel.fetch_message(payload.message_id)
@@ -178,7 +190,10 @@ class UpdateTranslatorCog(commands.Cog):
             return
         if msg.author.bot:
             return  # không đặt bản dịch lên chính bản dịch của bot
-        await self._ensure_translation(msg)
+        try:
+            await self._ensure_translation(msg)
+        except Exception as error:
+            print(f"[UpdateTranslator] không xử lý được reaction {msg.id}: {error}")
 
     # ============================================================
     # Xử lý chính
@@ -247,10 +262,9 @@ class UpdateTranslatorCog(commands.Cog):
             thread = await self._get_or_create_thread(message, text)
             if translated:
                 await self._post_to_thread(thread, translated)
-        except Exception as e:  # noqa: BLE001
-            print(f"[UpdateTranslator] lỗi xử lý {message.id}: {e}")
-        finally:
-            self.in_progress.discard(message.id)
+        except Exception as error:
+            print(f"[UpdateTranslator] lỗi xử lý {message.id}: {error}")
+            raise
 
     async def _translate(self, text: str) -> str | None:
         prompt = (
@@ -261,23 +275,41 @@ class UpdateTranslatorCog(commands.Cog):
         return await gemini_request(prompt)
 
     async def _get_or_create_thread(self, message: discord.Message, text: str) -> discord.Thread:
-        """Tìm thread đã tồn tại cho message, nếu chưa có thì tạo mới kèm title AI."""
-        mem = load_config().get("threads") or {}
-        tid = mem.get(str(message.id))
-        if tid:
-            thread = self.bot.get_channel(tid)
+        """Fetch the mapped thread (unarchiving if needed), creating only when missing."""
+        async with self._thread_lock(message.id):
+            config = await load_config()
+            thread_id = (config.get("threads") or {}).get(str(message.id))
+            thread = None
+            if thread_id:
+                thread = self.bot.get_channel(int(thread_id))
+                if not isinstance(thread, discord.Thread):
+                    try:
+                        thread = await self.bot.fetch_channel(int(thread_id))
+                    except discord.NotFound:
+                        thread = None
+                if thread is not None and not isinstance(thread, discord.Thread):
+                    raise TypeError(f"Stored channel {thread_id} is not a thread.")
+            if thread is None:
+                thread = getattr(message, "thread", None)
             if isinstance(thread, discord.Thread):
+                if thread.archived:
+                    await thread.edit(archived=False)
+                if not thread_id:
+                    async with self._config_lock:
+                        config = await load_config()
+                        config.setdefault("threads", {})[str(message.id)] = thread.id
+                        await save_config(config)
                 return thread
 
-        title = await self._make_title(text)
-        thread = await message.create_thread(
-            name=title, auto_archive_duration=1440  # archive sau 1 giờ, đủ cho discussion
-        )
-        # lưu mapping message_id -> thread_id
-        cfg = load_config()
-        cfg.setdefault("threads", {})[str(message.id)] = thread.id
-        save_config(cfg)
-        return thread
+            title = await self._make_title(text)
+            thread = await message.create_thread(
+                name=title, auto_archive_duration=1440
+            )
+            async with self._config_lock:
+                config = await load_config()
+                config.setdefault("threads", {})[str(message.id)] = thread.id
+                await save_config(config)
+            return thread
 
     async def _make_title(self, text: str) -> str:
         """AI đặt tiêu đề thread ngắn theo nội dung. Fallback dòng đầu."""
@@ -316,8 +348,8 @@ class UpdateTranslatorCog(commands.Cog):
 
     async def _already_done(self, message: discord.Message) -> bool:
         """True nếu message đã có thread trong mapping (đã xử lý trước đó)."""
-        mem = load_config().get("threads") or {}
-        return str(message.id) in mem
+        config = await load_config()
+        return str(message.id) in (config.get("threads") or {})
 
     # ============================================================
     # Slash commands
@@ -336,55 +368,56 @@ class UpdateTranslatorCog(commands.Cog):
     ):
         if not is_officer(interaction.user):
             return await interaction.response.send_message("❌ Bạn không có quyền!", ephemeral=True)
-        cfg = load_config()
         guild = interaction.guild
-
-        if channel:
-            ch = self.lookup_channel(guild, channel)
-            if not ch:
-                return await interaction.response.send_message(
-                    f"❌ Không tìm thấy kênh tên chứa `{channel}` trong server.", ephemeral=True
-                )
-            ids = cfg.setdefault("channel_ids", [])
-            if ch.id not in ids:
-                ids.append(ch.id)
-            save_config(cfg)
-            await interaction.response.send_message(
-                f"✅ Đã thêm kênh **#{ch.name}** vào danh sách tự dịch.", ephemeral=True
+        selected_channel = self.lookup_channel(guild, channel) if channel and guild else None
+        if channel and not selected_channel:
+            return await interaction.response.send_message(
+                f"❌ Không tìm thấy kênh tên chứa `{channel}` trong server.", ephemeral=True
             )
-            return
+        if not channel and not enable:
+            return await interaction.response.send_message(
+                "Dùng `/utconfig channel:<tên>` để thêm kênh, `/utconfig enable:on|off` để bật/tắt.",
+                ephemeral=True,
+            )
 
-        if enable:
-            cfg["enabled"] = (enable.value == "on")
-            save_config(cfg)
-            state = "BẬT ✅" if cfg["enabled"] else "TẮT ❌"
-            await interaction.response.send_message(f"⚙️ Tính năng tự dịch #update: **{state}**", ephemeral=True)
-            return
-
-        await interaction.response.send_message(
-            "Dùng `/utconfig channel:<tên>` để thêm kênh, `/utconfig enable:on|off` để bật/tắt.",
-            ephemeral=True,
-        )
+        await interaction.response.defer(ephemeral=True)
+        try:
+            async with self._config_lock:
+                config = await load_config()
+                if selected_channel:
+                    channel_ids = config.setdefault("channel_ids", [])
+                    if selected_channel.id not in channel_ids:
+                        channel_ids.append(selected_channel.id)
+                    success = f"✅ Đã thêm kênh **#{selected_channel.name}** vào danh sách tự dịch."
+                else:
+                    config["enabled"] = enable.value == "on"
+                    state = "BẬT ✅" if config["enabled"] else "TẮT ❌"
+                    success = f"⚙️ Tính năng tự dịch #update: **{state}**"
+                await save_config(config)
+        except Exception as error:
+            return await interaction.followup.send(f"❌ Không thể lưu cấu hình: `{error}`", ephemeral=True)
+        await interaction.edit_original_response(content=success)
 
     @app_commands.command(name="utstatus", description="Xem cấu hình kênh #update + trạng thái dịch")
     async def utstatus_cmd(self, interaction: discord.Interaction):
-        cfg = load_config()
+        await interaction.response.defer(ephemeral=True)
+        try:
+            config = await load_config()
+        except Exception as error:
+            return await interaction.followup.send(f"❌ Không thể đọc cấu hình: `{error}`", ephemeral=True)
         guild = interaction.guild
-        lines = []
-        lines.append(f"🔛 Trạng thái: **{'BẬT' if cfg.get('enabled') else 'TẮT'}**")
-        if cfg.get("channel_ids"):
+        lines = [f"🔛 Trạng thái: **{'BẬT' if config.get('enabled') else 'TẮT'}**"]
+        if config.get("channel_ids"):
             names = []
-            for cid in cfg["channel_ids"]:
-                ch = guild.get_channel(cid) if guild else None
-                names.append(f"#{ch.name}" if ch else f"`{cid}` (không tìm thấy)")
+            for channel_id in config["channel_ids"]:
+                channel = guild.get_channel(int(channel_id)) if guild else None
+                names.append(f"#{channel.name}" if channel else f"`{channel_id}` (không tìm thấy)")
             lines.append(f"📌 Kênh: {', '.join(names)}")
         else:
             lines.append("📌 Kênh: chưa cấu hình (dùng `/utconfig channel:<tên>`)")
-        key_state = "✅ Có" if GEMINI_API_KEY else "❌ Thiếu"
-        lines.append(f"🤖 Gemini API key: {key_state}")
-        nt = len(cfg.get("threads") or {})
-        lines.append(f"🧵 Số thread đã tạo: {nt}")
-        await interaction.response.send_message("\n".join(lines), ephemeral=True)
+        lines.append(f"🤖 Gemini API key: {'✅ Có' if GEMINI_API_KEY else '❌ Thiếu'}")
+        lines.append(f"🧵 Số thread đã tạo: {len(config.get('threads') or {})}")
+        await interaction.edit_original_response(content="\n".join(lines))
 
 
 async def setup(bot: commands.Bot):

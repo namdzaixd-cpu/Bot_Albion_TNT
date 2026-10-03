@@ -1,18 +1,46 @@
-import os
-import json
-from dotenv import load_dotenv
-from supabase import create_client, Client
+"""Initialize SP metadata from an explicitly selected offline legacy snapshot."""
 
-load_dotenv()
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASE_ANON_KEY")
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+import argparse
 
-DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bot", "Storage")
-filepath = os.path.join(DATA_DIR, "tnc_sp_v32.json")
-if os.path.exists(filepath):
-    with open(filepath, 'r', encoding='utf-8') as f:
-        sp_data = json.load(f)
-        last_update = sp_data.get("last_update", "Chưa có dữ liệu")
-        supabase.table("sp_metadata").upsert({"id": 1, "last_update": last_update}).execute()
-        print(f"Set sp_metadata last_update to {last_update}")
+from _legacy_snapshot import (
+    create_supabase_client,
+    read_snapshot_json,
+    resolve_snapshot_dir,
+)
+
+
+SOURCE_FILE = "tnc_sp_v32.json"
+
+
+def import_snapshot(data: dict, client) -> None:
+    client.table("sp_metadata").upsert(
+        {"id": 1, "last_update": data.get("last_update", "Chưa có dữ liệu")},
+        on_conflict="id",
+        ignore_duplicates=True,
+    ).execute()
+
+
+def main(argv=None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--legacy-snapshot-dir",
+        required=True,
+        help="Directory containing an offline export; bot/Storage is protected and rejected.",
+    )
+    args = parser.parse_args(argv)
+
+    try:
+        snapshot_dir = resolve_snapshot_dir(args.legacy_snapshot_dir)
+        data = read_snapshot_json(snapshot_dir, SOURCE_FILE)
+        client = create_supabase_client()
+        import_snapshot(data, client)
+    except Exception as exc:
+        print(f"SP metadata import failed ({type(exc).__name__}).")
+        return 1
+
+    print("Initialized SP metadata from the selected offline snapshot.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

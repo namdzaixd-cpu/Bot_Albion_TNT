@@ -1,38 +1,21 @@
-"""Script gộp test API + model (kèm system instruction thật) — chạy: python test_api_key/test_api_full_with_instruction.py"""
+"""Interactive API helper; requires an explicit instruction file path."""
+import argparse
 import json
 import os
-import ssl
 import sys
 import time
 import urllib.error
 import urllib.request
+from pathlib import Path
 
-# Thêm đường dẫn để import được core.config khi chạy từ thư mục khác
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-sys.path.append(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "bot"))
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(PROJECT_ROOT))
+sys.path.insert(0, str(PROJECT_ROOT / "bot"))
 
-# Load cấu hình từ bot
-from core.config import DATA_DIR, GEMINI_API_KEY, OPENROUTER_API_KEY
-
-try:
-    from dotenv import load_dotenv
-    load_dotenv()
-except ImportError:
-    pass
-
-OLLAMA_API_KEY = os.getenv("OLLAMA_API_KEY", "")
-if not GEMINI_API_KEY:
-    GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-if not OPENROUTER_API_KEY:
-    OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
-
-# Load system instruction từ template thật của bot
-instruction_path = os.path.join(DATA_DIR, "core", "templates", "chat_ai_instruction.txt")
-if not os.path.exists(instruction_path):
-    instruction_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "bot", "core", "templates", "chat_ai_instruction.txt")
-
-with open(instruction_path, "r", encoding="utf-8") as f:
-    raw_instruction = f.read()
+GEMINI_API_KEY = ""
+OPENROUTER_API_KEY = ""
+OLLAMA_API_KEY = ""
+raw_instruction = ""
 
 def choose_model():
     print("=== DANH SÁCH 13 MODEL HỖ TRỢ (KÈM SYSTEM INSTRUCTION) ===")
@@ -129,93 +112,121 @@ def get_api_setup(provider, model):
         }
         return url, headers
 
-# Bắt đầu thiết lập ban đầu
-provider, model = choose_model()
-url, headers = get_api_setup(provider, model)
-system_instruction = raw_instruction.replace("{CURRENT_MODEL}", model)
-
-provider_names = {"1": "Gemini", "2": "Ollama", "3": "OpenRouter"}
-print(f"\n[{provider_names[provider]}] Đang kết nối tới: {url}")
-print(f"[{provider_names[provider]}] Đang sử dụng model: {model}")
-print(f"System instruction: {len(system_instruction)} ký tự")
-print("Gõ câu hỏi rồi Enter (Ctrl+C để thoát), gõ `/model` để đổi model hoặc nhà cung cấp.\n")
-
-while True:
-    question = input("> ").strip()
-    if not question:
-        continue
-
-    # Đổi model hoặc provider
-    if question.lower() == "/model":
-        print()
-        provider, model = choose_model()
-        url, headers = get_api_setup(provider, model)
-        system_instruction = raw_instruction.replace("{CURRENT_MODEL}", model)
-        print(f"🔄 Đã chuyển sang: {provider_names[provider]} | Model: {model}\n")
-        continue
-
-    # Chuẩn bị payload theo từng bên (bao gồm system instruction)
-    if provider == "1":
-        body = json.dumps({
-            "systemInstruction": {"parts": [{"text": system_instruction}]},
-            "contents": [{"parts": [{"text": question}]}]
-        }).encode("utf-8")
-    elif provider == "2":
-        body = json.dumps({
-            "model": model,
-            "messages": [
-                {"role": "system", "content": system_instruction},
-                {"role": "user", "content": question}
-            ],
-            "stream": False
-        }).encode("utf-8")
-    else:
-        body = json.dumps({
-            "model": model,
-            "messages": [
-                {"role": "system", "content": system_instruction},
-                {"role": "user", "content": question}
-            ]
-        }).encode("utf-8")
-
-    req = urllib.request.Request(url, data=body, headers=headers, method="POST")
-    start = time.perf_counter()
-    
+def load_instruction(path_value):
+    if not path_value:
+        raise ValueError(
+            "Provide --instruction-path or set AI_INSTRUCTION_PATH to the instruction file."
+        )
     try:
-        ssl_context = ssl._create_unverified_context()
-        with urllib.request.urlopen(req, context=ssl_context) as resp:
-            result = json.loads(resp.read().decode("utf-8"))
-        elapsed = time.perf_counter() - start
-        
-        # Parse kết quả theo từng bên
+        path = Path(path_value).expanduser().resolve(strict=True)
+    except OSError as exc:
+        raise ValueError("The configured instruction file does not exist.") from exc
+    if not path.is_file():
+        raise ValueError("The configured instruction path is not a file.")
+    try:
+        return path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise ValueError("The configured instruction file could not be read.") from exc
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--instruction-path",
+        default=os.environ.get("AI_INSTRUCTION_PATH"),
+        help="Path to the real system instruction file (or set AI_INSTRUCTION_PATH).",
+    )
+    args = parser.parse_args(argv)
+
+    global GEMINI_API_KEY, OPENROUTER_API_KEY, OLLAMA_API_KEY, raw_instruction
+    try:
+        raw_instruction = load_instruction(args.instruction_path)
+    except ValueError as exc:
+        parser.error(str(exc))
+
+    from core.config import GEMINI_API_KEY as gemini_key
+    from core.config import OPENROUTER_API_KEY as openrouter_key
+
+    GEMINI_API_KEY = gemini_key or os.getenv("GEMINI_API_KEY", "")
+    OPENROUTER_API_KEY = openrouter_key or os.getenv("OPENROUTER_API_KEY", "")
+    OLLAMA_API_KEY = os.getenv("OLLAMA_API_KEY", "")
+
+    provider_names = {"1": "Gemini", "2": "Ollama", "3": "OpenRouter"}
+    provider, model = choose_model()
+    url, headers = get_api_setup(provider, model)
+    system_instruction = raw_instruction.replace("{CURRENT_MODEL}", model)
+    print(f"\n[{provider_names[provider]}] Sẵn sàng gửi yêu cầu.")
+    print(f"[{provider_names[provider]}] Đang sử dụng model: {model}")
+    print(f"System instruction: {len(system_instruction)} ký tự")
+    print("Gõ câu hỏi rồi Enter (Ctrl+C để thoát), gõ `/model` để đổi model hoặc nhà cung cấp.\n")
+
+    while True:
+        question = input("> ").strip()
+        if not question:
+            continue
+
+        if question.lower() == "/model":
+            print()
+            provider, model = choose_model()
+            url, headers = get_api_setup(provider, model)
+            system_instruction = raw_instruction.replace("{CURRENT_MODEL}", model)
+            print(f"🔄 Đã chuyển sang: {provider_names[provider]} | Model: {model}\n")
+            continue
+
         if provider == "1":
-            reply = result["candidates"][0]["content"]["parts"][0]["text"]
+            body = json.dumps({
+                "systemInstruction": {"parts": [{"text": system_instruction}]},
+                "contents": [{"parts": [{"text": question}]}]
+            }).encode("utf-8")
         elif provider == "2":
-            reply = result["message"]["content"]
+            body = json.dumps({
+                "model": model,
+                "messages": [
+                    {"role": "system", "content": system_instruction},
+                    {"role": "user", "content": question}
+                ],
+                "stream": False
+            }).encode("utf-8")
         else:
-            reply = result["choices"][0]["message"]["content"]
-            
-        print(f"\n[{elapsed:.2f}s] {reply}\n")
-    except urllib.error.HTTPError as e:
-        elapsed = time.perf_counter() - start
-        error_content = e.read().decode('utf-8')
-        print(f"\n[{elapsed:.2f}s] Lỗi HTTP {e.code}: {error_content}")
-        
-        if e.code == 429:
-            print("❌ [LỖI 2]: Đã chạm giới hạn request/ngày hoặc tần suất của API (Rate Limit / Quota Exceeded).")
-            print("👉 Hướng dẫn: API Key này đã hết lượt dùng hôm nay. Vui lòng đổi sang API Key khác trong file .env!\n")
-        elif e.code in (401, 403):
-            print("❌ [LỖI 1/2]: API Key không hợp lệ hoặc không có quyền truy cập.")
-            key_name = "GEMINI_API_KEY" if provider == "1" else ("OLLAMA_API_KEY" if provider == "2" else "OPENROUTER_API_KEY")
-            print(f"👉 Hướng dẫn: Vui lòng kiểm tra lại giá trị {key_name} trong file .env!\n")
-        elif e.code == 404 and provider == "2":
-            print("❌ [LỖI 2]: Model hoặc đường dẫn không tồn tại trên server Ollama (Lỗi 404).")
-            print("👉 Hướng dẫn: Hãy kiểm tra xem bạn đã pull model này (`ollama pull <model>`) về máy chưa!\n")
-        elif e.code in (400, 404) and provider == "1":
-            print("❌ [LỖI 2]: Model không tồn tại hoặc không còn khả dụng trên Google AI Studio (Lỗi 400/404).")
-            print("👉 Hướng dẫn: Vui lòng kiểm tra lại tên model Google hỗ trợ hoặc đổi model khác.\n")
-        else:
-            print("👉 Hướng dẫn: Kiểm tra lại cấu hình, URL hoặc model xem có chính xác không.\n")
-    except Exception as e:
-        elapsed = time.perf_counter() - start
-        print(f"\n[{elapsed:.2f}s] Lỗi kết nối: {str(e)}\n")
+            body = json.dumps({
+                "model": model,
+                "messages": [
+                    {"role": "system", "content": system_instruction},
+                    {"role": "user", "content": question}
+                ]
+            }).encode("utf-8")
+
+        req = urllib.request.Request(url, data=body, headers=headers, method="POST")
+        start = time.perf_counter()
+
+        try:
+            with urllib.request.urlopen(req) as resp:
+                result = json.loads(resp.read().decode("utf-8"))
+            elapsed = time.perf_counter() - start
+            if provider == "1":
+                reply = result["candidates"][0]["content"]["parts"][0]["text"]
+            elif provider == "2":
+                reply = result["message"]["content"]
+            else:
+                reply = result["choices"][0]["message"]["content"]
+            print(f"\n[{elapsed:.2f}s] {reply}\n")
+        except urllib.error.HTTPError as exc:
+            elapsed = time.perf_counter() - start
+            print(f"\n[{elapsed:.2f}s] Lỗi HTTP {exc.code}")
+            if exc.code == 429:
+                print("Đã chạm giới hạn request hoặc quota API.")
+            elif exc.code in (401, 403):
+                print("API key không hợp lệ hoặc không có quyền truy cập.")
+            elif exc.code == 404 and provider == "2":
+                print("Model hoặc đường dẫn Ollama không tồn tại.")
+            elif exc.code in (400, 404) and provider == "1":
+                print("Model Gemini không tồn tại hoặc không còn khả dụng.")
+            else:
+                print("Kiểm tra cấu hình, URL hoặc model.")
+        except Exception as exc:
+            elapsed = time.perf_counter() - start
+            print(f"\n[{elapsed:.2f}s] Lỗi kết nối ({type(exc).__name__}).\n")
+
+
+if __name__ == "__main__":
+    main()

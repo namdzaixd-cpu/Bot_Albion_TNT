@@ -1,38 +1,26 @@
 import { NextResponse } from "next/server";
 import { supabase } from "@/lib/supabaseServer";
+import { GUILD_ID } from "@/lib/guild";
 
-const GUILD_ID =
-  process.env.DISCORD_GUILD_ID ||
-  process.env.GUILD_ID ||
-  "712258265769050164"; // fallback cố định: guild TNC (tránh 0/0 khi thiếu env)
-
-/**
- * Lấy số thành viên THẬT của guild Discord.
- * Dùng endpoint /guilds/{id}?with_counts=true -> approximate_member_count.
- * Trả null nếu không có token hoặc gọi lỗi, để UI biết mà hiện "—"
- * thay vì bịa ra một con số.
- */
 async function fetchMemberCount(): Promise<number | null> {
   const token = process.env.DISCORD_TOKEN;
-  if (!token || !GUILD_ID || GUILD_ID === "default") return null;
+  if (!token) return null;
   try {
-    const res = await fetch(
+    const response = await fetch(
       `https://discord.com/api/v10/guilds/${GUILD_ID}?with_counts=true`,
       {
         headers: {
           Authorization: `Bot ${token}`,
-          // Discord BẮT BUỘC User-Agent cho request từ server,
-          // thiếu là bị chặn 403 dù token hoàn toàn hợp lệ.
           "User-Agent": "DiscordBot (https://bot-albion-tnt.vercel.app, 1.0)",
         },
-        next: { revalidate: 60 }, // cache 60s, tránh dính rate limit
+        next: { revalidate: 60 },
       }
     );
-    if (!res.ok) return null;
-    const g = await res.json();
-    return (
-      g.approximate_member_count ?? g.member_count ?? null
-    );
+    if (!response.ok) return null;
+    const payload: unknown = await response.json();
+    if (!payload || typeof payload !== 'object') return null;
+    const count = Reflect.get(payload, 'approximate_member_count') ?? Reflect.get(payload, 'member_count');
+    return typeof count === 'number' && Number.isFinite(count) ? count : null;
   } catch {
     return null;
   }
@@ -40,59 +28,85 @@ async function fetchMemberCount(): Promise<number | null> {
 
 export async function GET() {
   try {
-    // Song song lấy dữ liệu từ các bảng + Discord API
-    const [corebank, blacklist, logs, siphoned, cfg, memberCount] =
-      await Promise.all([
-        supabase.from("corebank_config").select("*").eq("guild_id", GUILD_ID).maybeSingle(),
-        supabase.from("blacklist").select("id", { count: "exact" }).eq("guild_id", GUILD_ID),
-        supabase.from("logs").select("*").order("created_at", { ascending: false }).limit(8),
-        supabase.from("siphoned_energy").select("*", { count: "exact" }).eq("guild_id", GUILD_ID),
-        supabase.from("guild_config").select("*").eq("guild_id", GUILD_ID).maybeSingle(),
-        fetchMemberCount(),
-      ]);
+    const [metricsResult, logsResult, configResult, memberCount] = await Promise.all([
+      supabase.rpc('dashboard_overview_metrics', { p_guild_id: GUILD_ID }),
+      supabase
+        .from('system_logs')
+        .select('id,level,module,message,created_at')
+        .eq('guild_id', GUILD_ID)
+        .order('created_at', { ascending: false })
+        .limit(8),
+      supabase.from('guild_config').select('*').eq('guild_id', GUILD_ID).maybeSingle(),
+      fetchMemberCount(),
+    ]);
 
-    // ── Danh sách module bật/tắt ──────────────────────────────────────
-    // Tự dò các cột dạng is_<ten>_enabled đang CÓ THẬT trong bảng config,
-    // nên thêm cột mới trong Supabase là dashboard tự hiện, không cần sửa code.
-    const row = (cfg.data || {}) as Record<string, unknown>;
-    const modules = Object.keys(row)
-      .filter((k) => /^is_.+_enabled$/.test(k))
-      .sort()
-      .map((key) => ({
-        key,
-        id: key.replace(/^is_/, "").replace(/_enabled$/, ""),
-        enabled: Boolean(row[key]),
-      }));
+    if (metricsResult.error || logsResult.error || configResult.error) {
+      console.error('Lỗi truy vấn dữ liệu tổng quan:', {
+        metrics: metricsResult.error?.message,
+        logs: logsResult.error?.message,
+        config: configResult.error?.message,
+      });
+      return NextResponse.json(
+        { error: 'Không thể tải đầy đủ dữ liệu tổng quan. Vui lòng thử lại.' },
+        { status: 500 }
+      );
+    }
+    if (!metricsResult.data || typeof metricsResult.data !== 'object') {
+      return NextResponse.json({ error: 'Dữ liệu tổng quan không hợp lệ.' }, { status: 500 });
+    }
 
-    const stats = {
-      members: memberCount,            // null = không lấy được, UI hiện "—"
-      members_live: memberCount !== null,
-      corebank_total: corebank.data?.total_silver ?? 0,
-      blacklist_count: blacklist.count ?? 0,
-      ai_today: logs.data?.filter((l: { type?: string }) => l.type === "ai").length ?? 0,
+    const metric = metricsResult.data;
+    const readCount = (field: string) => {
+      const value = Reflect.get(metric, field);
+      if (typeof value !== 'number' || !Number.isFinite(value)) {
+        throw new Error(`Invalid overview metric: ${field}`);
+      }
+      return value;
     };
 
-    const activity = (logs.data || []).map(
-      (l: Record<string, string>) => ({
-        time: l.created_at,
-        event: l.message || l.event || "—",
-        module: l.module || l.type || "system",
-        status: l.status || "ok",
-      })
-    );
+    const configData: unknown = configResult.data ?? {};
+    const configEntries = configData && typeof configData === 'object'
+      ? Object.entries(configData)
+      : [];
+    const modules = configEntries
+      .filter(([key]) => /^is_.+_enabled$/.test(key))
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, value]) => ({
+        key,
+        id: key.replace(/^is_/, '').replace(/_enabled$/, ''),
+        enabled: value === true,
+      }));
 
-    return new NextResponse(
-      JSON.stringify({
-        stats,
+    const activity = (logsResult.data ?? []).map((log: {
+      created_at: string; message: string | null; module: string | null; level: string;
+    }) => ({
+      time: log.created_at,
+      event: log.message || '—',
+      module: log.module || 'system',
+      status: log.level === 'ERROR' ? 'error' : 'ok',
+    }));
+
+    return NextResponse.json(
+      {
+        stats: {
+          members: memberCount,
+          members_live: memberCount !== null,
+          corebank_total: readCount('corebank_total'),
+          blacklist_count: readCount('blacklist_count'),
+          ai_today: readCount('ai_today'),
+        },
         modules,
         activity,
-        siphoned_count: siphoned.count ?? 0,
+        siphoned_count: readCount('siphoned_count'),
         updated_at: new Date().toISOString(),
-      }),
-      { headers: { "Cache-Control": "no-store" } }
+      },
+      { headers: { 'Cache-Control': 'no-store' } }
     );
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : "Lỗi không xác định";
-    return NextResponse.json({ error: msg }, { status: 500 });
+  } catch (error: unknown) {
+    console.error('Lỗi tổng quan dashboard:', error instanceof Error ? error.message : 'Lỗi không xác định');
+    return NextResponse.json(
+      { error: 'Không thể tải dữ liệu tổng quan. Vui lòng thử lại.' },
+      { status: 500 }
+    );
   }
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useRef, useState, useEffect } from "react";
 import Link from "next/link";
 import { useSession, signIn } from "next-auth/react";
 import SearchableSelect, { Option } from "@/components/SearchableSelect";
@@ -40,6 +40,7 @@ export default function Dashboard() {
   const [allEnabled, setAllEnabled] = useState(false);
   const [toggling, setToggling] = useState(false);
   const [moduleCount, setModuleCount] = useState({ on: 0, total: 0 });
+  const [moduleState, setModuleState] = useState<'loading' | 'ready' | 'error'>('loading');
   const [modulesVersion, setModulesVersion] = useState(0);
   const [config, setConfig] = useState({
     apply_channel_id: "",
@@ -50,6 +51,12 @@ export default function Dashboard() {
     member_role_id: ""
   });
   const [loading, setLoading] = useState(true);
+  const saveQueue = useRef<Promise<void>>(Promise.resolve());
+  const serializeSave = (save: () => Promise<void>) => {
+    const pending = saveQueue.current.then(save, save);
+    saveQueue.current = pending;
+    return pending;
+  };
 
   // Discord Data
   const [discordChannels, setDiscordChannels] = useState<Option[]>([]);
@@ -90,33 +97,45 @@ export default function Dashboard() {
     fetchConfig();
   }, []);
 
-  const handleConfigChange = async (field: string, value: string) => {
+  const handleConfigChange = (field: string, value: string) => {
     setConfig(prev => ({ ...prev, [field]: value }));
-    try {
-      await fetch('/api/config', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ [field]: value })
-      });
-    } catch (err) {
-      console.error("Lỗi lưu config:", err);
-    }
+    void serializeSave(async () => {
+      try {
+        const response = await fetch('/api/config', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ [field]: value })
+        });
+        if (!response.ok) {
+          const error: unknown = await response.json().catch(() => null);
+          const message = error && typeof error === 'object' && 'error' in error &&
+            typeof error.error === 'string' ? error.error : "Không thể lưu cấu hình guild.";
+          alert(message);
+        }
+      } catch {
+        alert("Lỗi mạng khi lưu cấu hình guild.");
+      }
+    });
   };
 
   // Đọc trạng thái tổng của tất cả module (cho công tắc ở header)
   useEffect(() => {
     let alive = true;
     const loadModules = async () => {
+      setModuleState('loading');
       try {
         const res = await fetch('/api/overview');
-        if (!res.ok || !alive) return;
+        if (!res.ok) throw new Error('Không tải được trạng thái module');
         const d = await res.json();
         const mods: { enabled: boolean }[] = d.modules ?? [];
         if (!alive) return;
         const on = mods.filter(m => m.enabled).length;
         setModuleCount({ on, total: mods.length });
         setAllEnabled(mods.length > 0 && on === mods.length);
-      } catch { }
+        setModuleState('ready');
+      } catch {
+        if (alive) setModuleState('error');
+      }
     };
     loadModules();
     return () => { alive = false; };
@@ -129,28 +148,37 @@ export default function Dashboard() {
    */
   const handleToggle = async () => {
     const newVal = !allEnabled;
-    setAllEnabled(newVal);            // phản hồi tức thì cho mượt
+    setAllEnabled(newVal);
     setToggling(true);
-    try {
-      const res = await fetch('/api/modules', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ enabled: newVal })
-      });
-      if (!res.ok) {
-        setAllEnabled(!newVal);       // server từ chối -> trả về trạng thái cũ
-        const e = await res.json().catch(() => ({}));
-        alert(e.error || 'Không đổi được trạng thái module');
-        return;
+    await serializeSave(async () => {
+      try {
+        const response = await fetch('/api/modules', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ enabled: newVal })
+        });
+        if (!response.ok) {
+          const error: unknown = await response.json().catch(() => null);
+          if (error && typeof error === 'object' && 'saved' in error && error.saved === true) {
+            setIsOnboardEnabled(newVal);
+            setModulesVersion(version => version + 1);
+          } else {
+            setAllEnabled(!newVal);
+          }
+          const message = error && typeof error === 'object' && 'error' in error &&
+            typeof error.error === 'string' ? error.error : 'Không đổi được trạng thái module';
+          alert(message);
+          return;
+        }
+        setIsOnboardEnabled(newVal);
+        setModulesVersion(version => version + 1);
+      } catch {
+        setAllEnabled(!newVal);
+        alert("Lỗi mạng khi đổi trạng thái module.");
+      } finally {
+        setToggling(false);
       }
-      setIsOnboardEnabled(newVal);
-      setModulesVersion(v => v + 1);  // báo Tổng quan tải lại danh sách
-    } catch (err) {
-      setAllEnabled(!newVal);
-      console.error("Lỗi toggle module:", err);
-    } finally {
-      setToggling(false);
-    }
+    });
   };
 
 
@@ -273,14 +301,14 @@ export default function Dashboard() {
             <div className="text-right leading-tight">
               <span className="text-sm font-semibold text-text-muted block">Trạng thái Module:</span>
               <span className="text-[11px]" style={{ color: "#8b8499" }}>
-                {moduleCount.total > 0
-                  ? `${moduleCount.on}/${moduleCount.total} module đang bật`
-                  : "Đang tải..."}
+                {moduleState === 'error' ? 'Không tải được trạng thái'
+                  : moduleState === 'loading' ? 'Đang tải...'
+                    : `${moduleCount.on}/${moduleCount.total} module đang bật`}
               </span>
             </div>
             <button
               onClick={handleToggle}
-              disabled={toggling || moduleCount.total === 0}
+              disabled={toggling || moduleState !== 'ready' || moduleCount.total === 0}
               title={allEnabled ? "Tắt tất cả module" : "Bật tất cả module"}
               className={`relative inline-flex h-8 w-16 items-center rounded-full transition-colors duration-300 focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed ${allEnabled ? 'bg-green-500 shadow-[0_0_15px_rgba(34,197,94,0.4)]' : 'bg-surface'
                 }`}
@@ -291,7 +319,9 @@ export default function Dashboard() {
               />
             </button>
             <span className={`text-sm font-bold ${allEnabled ? 'text-green-400' : 'text-text-muted'}`}>
-              {toggling ? 'Đang lưu...' : allEnabled ? 'Bật Tất Cả' : 'Đã Tắt'}
+              {toggling ? 'Đang lưu...' : moduleState === 'error' ? 'Chưa xác định'
+                : moduleState === 'loading' ? 'Đang tải...'
+                  : allEnabled ? 'Bật Tất Cả' : moduleCount.on === 0 ? 'Đã Tắt' : 'Bật một phần'}
             </span>
           </div>
         </header>
@@ -304,7 +334,7 @@ export default function Dashboard() {
                 <h1 className="text-2xl font-bold text-white">Tổng quan</h1>
                 <p className="text-sm text-text-muted mt-1">Hoạt động bot theo thời gian thực</p>
               </div>
-              <OverviewDashboard />
+              <OverviewDashboard key={modulesVersion} />
             </div>
           ) : activeModule === 'guildcheck' ? (
             <GuildCheckPanel />

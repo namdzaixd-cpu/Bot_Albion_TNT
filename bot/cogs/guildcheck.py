@@ -1,6 +1,8 @@
+import asyncio
 import io
 import os
 from datetime import datetime, timezone, timedelta
+
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -8,7 +10,7 @@ import aiohttp
 
 from core.config import STORAGE_DIR
 from core.permissions import is_officer
-from core.storage import load_json, save_json
+from core.storage import load_json_async, save_json_async
 
 # ==============================================================================
 # HỆ THỐNG GUILDCHECK & QUẢN LÝ THÀNH VIÊN IN-GAME
@@ -22,11 +24,12 @@ REGION_API_BASE = {
 
 GUILDCHECK_CONFIG_DEFAULT = lambda: {"guild_id": "", "region": "Asia"}
 
-def load_guildcheck_config():
-    return load_json(GUILDCHECK_CONFIG_FILE, GUILDCHECK_CONFIG_DEFAULT)
+async def load_guildcheck_config():
+    return await load_json_async(GUILDCHECK_CONFIG_FILE, GUILDCHECK_CONFIG_DEFAULT)
 
-def save_guildcheck_config(data):
-    save_json(data, GUILDCHECK_CONFIG_FILE)
+
+async def save_guildcheck_config(data):
+    return await save_json_async(data, GUILDCHECK_CONFIG_FILE)
 
 def format_fame(val):
     """Định dạng Fame số lớn (K, M, B) cho dễ đọc."""
@@ -199,6 +202,7 @@ class GuildMembersPaginationView(discord.ui.View):
 class GuildCheckCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
+        self._config_lock = asyncio.Lock()
 
     @app_commands.command(name="guildconfig", description="Cấu hình Guild ID và Khu vực cho máy chủ (Officer only)")
     @app_commands.describe(
@@ -218,28 +222,40 @@ class GuildCheckCog(commands.Cog):
     ):
         if not is_officer(interaction.user):
             return await interaction.response.send_message("❌ Bạn không có quyền!", ephemeral=True)
-        config = load_guildcheck_config()
-        if guild_id:
-            config["guild_id"] = guild_id.strip()
-        if region:
-            config["region"] = region.value
-        save_guildcheck_config(config)
-
+        await interaction.response.defer(ephemeral=True)
+        try:
+            async with self._config_lock:
+                config = await load_guildcheck_config()
+                if guild_id:
+                    config["guild_id"] = guild_id.strip()
+                if region:
+                    config["region"] = region.value
+                await save_guildcheck_config(config)
+        except Exception as error:
+            return await interaction.followup.send(f"❌ Không thể cập nhật cấu hình GuildCheck: `{error}`", ephemeral=True)
         lines = [f"🆔 Guild ID: `{config.get('guild_id') or 'chưa cấu hình'}`"]
         lines.append(f"🌍 Region: `{config.get('region') or 'Asia'}`")
-        await interaction.response.send_message("✅ Đã lưu cấu hình GuildCheck:\n" + "\n".join(lines), ephemeral=True)
+        await interaction.edit_original_response(
+            content="✅ Đã lưu cấu hình GuildCheck:\n" + "\n".join(lines)
+        )
 
     @app_commands.command(name="guildcheck", description="Tra cứu xem một thành viên có ở trong Guild hay không")
     @app_commands.describe(ign="Tên nhân vật trong game (chính xác)")
     async def guildcheck_cmd(self, interaction: discord.Interaction, ign: str):
-        config = load_guildcheck_config()
+        await interaction.response.defer(ephemeral=False)
+        try:
+            config = await load_guildcheck_config()
+        except Exception as error:
+            return await interaction.followup.send(
+                f"❌ Không thể đọc cấu hình GuildCheck: `{error}`", ephemeral=True
+            )
         guild_id = config.get("guild_id")
         region = config.get("region", "Asia")
-        
         if not guild_id:
-            return await interaction.response.send_message("❌ Chưa cấu hình Guild ID! Vui lòng nhờ Officer dùng `/guildconfig`.", ephemeral=True)
-            
-        await interaction.response.defer(ephemeral=False)
+            return await interaction.followup.send(
+                "❌ Chưa cấu hình Guild ID! Vui lòng nhờ Officer dùng `/guildconfig`.",
+                ephemeral=True,
+            )
         
         player = await albion_search_player(region, ign)
         
@@ -285,17 +301,20 @@ class GuildCheckCog(commands.Cog):
         sort_by: app_commands.Choice[str] = None,
         export_file: bool = False
     ):
-        config = load_guildcheck_config()
+        await interaction.response.defer(ephemeral=False)
+        try:
+            config = await load_guildcheck_config()
+        except Exception as error:
+            return await interaction.followup.send(
+                f"❌ Không thể đọc cấu hình GuildCheck: `{error}`", ephemeral=True
+            )
         guild_id = config.get("guild_id")
         region = config.get("region", "Asia")
-
         if not guild_id:
-            return await interaction.response.send_message(
+            return await interaction.followup.send(
                 "❌ Chưa cấu hình Guild ID! Vui lòng nhờ Officer dùng `/guildconfig` để cài đặt.",
-                ephemeral=True
+                ephemeral=True,
             )
-
-        await interaction.response.defer(ephemeral=False)
 
         members = await albion_get_guild_members(region, guild_id)
         if members is None:
@@ -370,17 +389,20 @@ class GuildCheckCog(commands.Cog):
         if guild is None:
             return await interaction.response.send_message("❌ Lệnh này chỉ dùng được trong server Discord.", ephemeral=True)
 
-        config = load_guildcheck_config()
+        await interaction.response.defer(ephemeral=False)
+        try:
+            config = await load_guildcheck_config()
+        except Exception as error:
+            return await interaction.followup.send(
+                f"❌ Không thể đọc cấu hình GuildCheck: `{error}`", ephemeral=True
+            )
         guild_id = config.get("guild_id")
         region = config.get("region", "Asia")
-
         if not guild_id:
-            return await interaction.response.send_message(
+            return await interaction.followup.send(
                 "❌ Chưa cấu hình Guild ID! Vui lòng dùng `/guildconfig` trước.",
-                ephemeral=True
+                ephemeral=True,
             )
-
-        await interaction.response.defer(ephemeral=False)
 
         members = await albion_get_guild_members(region, guild_id)
         if members is None:

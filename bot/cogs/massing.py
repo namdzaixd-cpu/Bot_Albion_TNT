@@ -1,4 +1,6 @@
 import os
+import asyncio
+from copy import deepcopy
 
 import discord
 from discord import app_commands
@@ -6,7 +8,7 @@ from discord.ext import commands, tasks
 
 from core.config import STORAGE_DIR
 from core.permissions import is_officer
-from core.storage import load_json, save_json, save_json_async
+from core.storage import load_json_async, save_json_async
 
 # ==============================================================================
 # HỆ THỐNG MASSING
@@ -15,25 +17,85 @@ MASSING_FILE = os.path.join(STORAGE_DIR, "tnc_massing_v1.json")
 TEMPLATES_FILE = os.path.join(STORAGE_DIR, "tnc_templates_v1.json")
 
 active_parties = {}
+active_templates = {}
+_massing_loaded = False
+_templates_loaded = False
+# Shared across party and template whole-blob transactions, including failed-save rollback.
+_massing_state_lock = asyncio.Lock()
 role_icons = {"Tank": "🛡️", "Heal": "💚", "SP": "💜", "DPS": "⚔️"}
 
-
-def load_massing():
-    return load_json(MASSING_FILE, dict)
-
-
-async def save_massing():
-    await save_json_async(active_parties, MASSING_FILE)
+async def load_massing():
+    return await load_json_async(MASSING_FILE, dict)
 
 
-def load_templates():
-    return load_json(TEMPLATES_FILE, dict)
+# Mutating callers hold the shared lock through persistence and rollback.
+async def save_massing(previous_state=None):
+    if not _massing_loaded:
+        raise RuntimeError("Massing chưa được tải thành công; không thể ghi đè dữ liệu.")
+    try:
+        await save_json_async(active_parties, MASSING_FILE)
+    except Exception:
+        if previous_state is not None:
+            active_parties.clear()
+            active_parties.update(previous_state)
+        raise
 
 
+async def load_templates():
+    return await load_json_async(TEMPLATES_FILE, dict)
+
+
+# Mutating callers hold the shared lock through persistence and cache publication.
 async def save_templates(data):
+    if not _templates_loaded:
+        raise RuntimeError("Template chưa được tải thành công; không thể ghi đè dữ liệu.")
     await save_json_async(data, TEMPLATES_FILE)
+    active_templates.clear()
+    active_templates.update(deepcopy(data))
 
 
+def validate_party_layout(party_id, roles, weapon_slots):
+    slot_count = sum(len(weapon_slots.get(role, [])) for role in roles)
+    if slot_count + 10 > 25:
+        return "❌ Party vượt giới hạn 25 nút Discord. Hãy gộp hoặc giảm bớt các nhóm slot."
+    for role in roles:
+        for weapon, limit in weapon_slots.get(role, []):
+            label = role if weapon == role and len(weapon_slots[role]) == 1 else f"{role}-{weapon}"
+            if (
+                len(f"{label} {limit}/{limit}") > 80
+                or len(f"join_{party_id}_{role}_{weapon}") > 100
+                or len(f"{role}|{weapon}") > 100
+            ):
+                return "❌ Tên role/weapon hoặc giới hạn slot quá dài cho Discord. Hãy rút gọn."
+    return None
+
+
+async def _save_party_after_ack(interaction, view, mutate):
+    await interaction.response.defer()
+    async with _massing_state_lock:
+        party = active_parties.get(view.party_id)
+        if not party:
+            return False, "❌ Party hết hạn do bot restart."
+        previous_state = deepcopy(active_parties)
+        try:
+            error = mutate(party)
+        except Exception as error:
+            active_parties.clear()
+            active_parties.update(previous_state)
+            view.rebuild_buttons()
+            return False, f"❌ Không thể lưu party: `{error}`"
+        if error:
+            view.rebuild_buttons()
+            return False, error
+        try:
+            await save_massing(previous_state)
+        except Exception as error:
+            active_parties.clear()
+            active_parties.update(previous_state)
+            view.rebuild_buttons()
+            return False, f"❌ Không thể lưu party: `{error}`"
+        view.rebuild_buttons()
+        return True, None
 def parse_role_block(raw_text):
     roles = []
     weapon_slots = {}
@@ -150,30 +212,51 @@ class SlotPickSelect(discord.ui.Select):
         super().__init__(placeholder="Chọn slot...", options=options[:25], min_values=1, max_values=1)
 
     async def callback(self, interaction: discord.Interaction):
-        party = active_parties.get(self.party_id)
-        if not party:
-            return await interaction.response.send_message("❌ Party hết hạn do bot restart.", ephemeral=True)
         if self.values[0] == "none":
             return await interaction.response.send_message("❌ Không còn slot trống nào!", ephemeral=True)
         role, weapon = self.values[0].split("|", 1)
-        limit = dict(party["weapon_slots"][role])[weapon]
-        current = party["slots"][role].setdefault(weapon, [])
-        if len(current) >= limit:
-            return await interaction.response.send_message("❌ Slot vừa đầy, thử lại!", ephemeral=True)
-        if self.mode == "move":
-            self.parent_view._remove_member_everywhere(party, self.target_uid)
-        current.append(self.target_uid)
-        await save_massing()
-        self.parent_view.rebuild_buttons()
-        await interaction.response.edit_message(
+
+        def mutate(party):
+            if role not in party["weapon_slots"] or weapon not in dict(party["weapon_slots"][role]):
+                return "❌ Slot không còn tồn tại trong party."
+            current = party["slots"][role].get(weapon, [])
+            already_in_target = self.target_uid in current
+            if self.mode == "move":
+                in_party = any(
+                    self.target_uid in members
+                    for role_slots in party["slots"].values()
+                    for members in role_slots.values()
+                ) or self.target_uid in party.get("fills", [])
+                if not in_party:
+                    return "❌ Thành viên không còn trong party."
+            elif any(
+                self.target_uid in members
+                for role_slots in party["slots"].values()
+                for members in role_slots.values()
+            ) or self.target_uid in party.get("fills", []):
+                return "⚠️ Thành viên đã có trong party."
+            limit = dict(party["weapon_slots"][role])[weapon]
+            if len(current) - int(already_in_target) >= limit:
+                return "❌ Slot vừa đầy, thử lại!"
+            if self.mode == "move":
+                self.parent_view._remove_member_everywhere(party, self.target_uid)
+            current = party["slots"][role].setdefault(weapon, [])
+            if not already_in_target or self.mode == "move":
+                current.append(self.target_uid)
+            return None
+
+        success, error = await _save_party_after_ack(interaction, self.parent_view, mutate)
+        if not success:
+            await interaction.edit_original_response(content=error, embed=None, view=None)
+            restored = active_parties.get(self.party_id)
+            if restored:
+                await self.parent_view.refresh_original(interaction, restored)
+            return
+        await interaction.edit_original_response(
             content=f"✅ Đã {'thêm' if self.mode=='add' else 'chuyển'} <@{self.target_uid}> vào **{role}-{weapon}**.",
             embed=None, view=None
         )
-        try:
-            await self.parent_view.refresh_original(interaction, party)
-        except Exception as e:
-            print(f"[Error] {e}")
-            pass
+        await self.parent_view.refresh_original(interaction, active_parties[self.party_id])
 
 
 class SlotPickView(discord.ui.View):
@@ -209,15 +292,26 @@ class MemberPickSelect(discord.ui.Select):
             return await interaction.response.send_message("❌ Party chưa có ai để chọn!", ephemeral=True)
         target_uid = int(self.values[0])
         if self.mode == "kick":
-            self.parent_view._remove_member_everywhere(party, target_uid)
-            await save_massing()
-            self.parent_view.rebuild_buttons()
-            await interaction.response.edit_message(content=f"✅ Đã kick <@{target_uid}> khỏi party.", view=None)
-            try:
-                await self.parent_view.refresh_original(interaction, party)
-            except Exception as e:
-                print(f"[Error] {e}")
-                pass
+            def mutate(party):
+                present = any(
+                    target_uid in members
+                    for role_slots in party["slots"].values()
+                    for members in role_slots.values()
+                ) or target_uid in party.get("fills", [])
+                if not present:
+                    return "❌ Thành viên không còn trong party."
+                self.parent_view._remove_member_everywhere(party, target_uid)
+                return None
+
+            success, error = await _save_party_after_ack(interaction, self.parent_view, mutate)
+            if not success:
+                await interaction.edit_original_response(content=error, view=None)
+                restored = active_parties.get(self.party_id)
+                if restored:
+                    await self.parent_view.refresh_original(interaction, restored)
+                return
+            await interaction.edit_original_response(content=f"✅ Đã kick <@{target_uid}> khỏi party.", view=None)
+            await self.parent_view.refresh_original(interaction, active_parties[self.party_id])
         else:
             await interaction.response.edit_message(
                 content=f"👉 Chọn slot mới muốn chuyển <@{target_uid}> vào:",
@@ -376,49 +470,73 @@ class PartyView(discord.ui.View):
 
     def make_join_callback(self, role, weapon):
         async def callback(interaction: discord.Interaction):
-            party = active_parties.get(self.party_id)
-            if not party:
-                return await interaction.response.send_message("❌ Party hết hạn do bot restart.", ephemeral=True)
             uid = interaction.user.id
-            self._remove_member_everywhere(party, uid)
-            limit = dict(party["weapon_slots"][role])[weapon]
-            current = party["slots"][role].setdefault(weapon, [])
-            if len(current) >= limit:
-                return await interaction.response.send_message(f"❌ Slot **{role}-{weapon}** vừa đầy!", ephemeral=True)
-            current.append(uid)
-            await save_massing()
-            self.rebuild_buttons()
-            await interaction.response.edit_message(embed=build_party_embed(party), view=self)
+
+            def mutate(party):
+                if role not in party["weapon_slots"] or weapon not in dict(party["weapon_slots"][role]):
+                    return "❌ Slot không còn tồn tại trong party."
+                current = party["slots"][role].get(weapon, [])
+                limit = dict(party["weapon_slots"][role])[weapon]
+                if uid not in current and len(current) >= limit:
+                    return f"❌ Slot **{role}-{weapon}** vừa đầy!"
+                self._remove_member_everywhere(party, uid)
+                party["slots"][role].setdefault(weapon, []).append(uid)
+                return None
+
+            success, error = await _save_party_after_ack(interaction, self, mutate)
+            if not success:
+                await interaction.followup.send(error, ephemeral=True)
+                return
+            await interaction.edit_original_response(
+                embed=build_party_embed(active_parties[self.party_id]), view=self
+            )
         return callback
 
     async def fill_callback(self, interaction: discord.Interaction):
-        party = active_parties.get(self.party_id)
-        if not party:
-            return await interaction.response.send_message("❌ Party hết hạn do bot restart.", ephemeral=True)
-        if not self._is_full(party):
-            return await interaction.response.send_message("⚠️ Party chưa full!", ephemeral=True)
         uid = interaction.user.id
-        for role in party["roles"]:
-            for weapon in party["slots"][role]:
-                if uid in party["slots"][role][weapon]:
-                    return await interaction.response.send_message("⚠️ Bạn đã có slot chính thức rồi!", ephemeral=True)
-        if uid in party.get("fills", []):
-            return await interaction.response.send_message("⚠️ Bạn đã trong danh sách Fill rồi!", ephemeral=True)
-        party.setdefault("fills", []).append(uid)
-        await save_massing()
-        self.rebuild_buttons()
-        await interaction.response.edit_message(embed=build_party_embed(party), view=self)
+
+        def mutate(party):
+            if not self._is_full(party):
+                return "⚠️ Party chưa full!"
+            if any(
+                uid in members
+                for role in party["roles"]
+                for members in party["slots"][role].values()
+            ):
+                return "⚠️ Bạn đã có slot chính thức rồi!"
+            if uid in party.get("fills", []):
+                return "⚠️ Bạn đã trong danh sách Fill rồi!"
+            party.setdefault("fills", []).append(uid)
+            return None
+
+        success, error = await _save_party_after_ack(interaction, self, mutate)
+        if not success:
+            await interaction.followup.send(error, ephemeral=True)
+            return
+        await interaction.edit_original_response(
+            embed=build_party_embed(active_parties[self.party_id]), view=self
+        )
 
     async def leave_callback(self, interaction: discord.Interaction):
-        party = active_parties.get(self.party_id)
-        if not party:
-            return await interaction.response.send_message("❌ Party hết hạn do bot restart.", ephemeral=True)
         uid = interaction.user.id
-        if not self._remove_member_everywhere(party, uid):
-            return await interaction.response.send_message("⚠️ Bạn chưa đăng ký party này.", ephemeral=True)
-        await save_massing()
-        self.rebuild_buttons()
-        await interaction.response.edit_message(embed=build_party_embed(party), view=self)
+
+        def mutate(party):
+            if not any(
+                uid in members
+                for role in party["roles"]
+                for members in party["slots"][role].values()
+            ) and uid not in party.get("fills", []):
+                return "⚠️ Bạn chưa đăng ký party này."
+            self._remove_member_everywhere(party, uid)
+            return None
+
+        success, error = await _save_party_after_ack(interaction, self, mutate)
+        if not success:
+            await interaction.followup.send(error, ephemeral=True)
+            return
+        await interaction.edit_original_response(
+            embed=build_party_embed(active_parties[self.party_id]), view=self
+        )
 
     async def add_callback(self, interaction: discord.Interaction):
         party = active_parties.get(self.party_id)
@@ -460,9 +578,23 @@ class PartyView(discord.ui.View):
             return await interaction.response.send_message("❌ Party hết hạn do bot restart.", ephemeral=True)
         if not can_manage(party, interaction.user):
             return await interaction.response.send_message("❌ Chỉ người tạo hoặc Officer mới xóa được!", ephemeral=True)
-        del active_parties[self.party_id]
-        await save_massing()
-        await interaction.response.edit_message(content="🗑️ **Party đã bị xóa.**", embed=None, view=None)
+
+        def mutate(party):
+            if not can_manage(party, interaction.user):
+                return "❌ Chỉ người tạo hoặc Officer mới xóa được!"
+            del active_parties[self.party_id]
+            return None
+
+        success, error = await _save_party_after_ack(interaction, self, mutate)
+        if not success:
+            restored = active_parties.get(self.party_id)
+            await interaction.edit_original_response(
+                content=error,
+                embed=build_party_embed(restored) if restored else None,
+                view=self if restored else None,
+            )
+            return
+        await interaction.edit_original_response(content="🗑️ **Party đã bị xóa.**", embed=None, view=None)
 
     async def copy_callback(self, interaction: discord.Interaction):
         party = active_parties.get(self.party_id)
@@ -523,10 +655,17 @@ class MassingModal(discord.ui.Modal, title="⚔️ Tạo Massing"):
             self.party_note.default = prefill_note
 
     async def on_submit(self, interaction: discord.Interaction):
+        if not _massing_loaded:
+            return await interaction.response.send_message(
+                "❌ Kho Massing chưa tải được; không thể tạo party an toàn.", ephemeral=True
+            )
         time_str = self.party_time.value.strip() if self.party_time.value else ""
         note = self.party_note.value.strip() if self.party_note.value else ""
         roles, weapon_slots = parse_role_block(self.party_roles.value or "")
         party_id = str(interaction.id)
+        layout_error = validate_party_layout(party_id, roles, weapon_slots)
+        if layout_error:
+            return await interaction.response.send_message(layout_error, ephemeral=True)
         party_data = {
             "id": party_id,
             "name": self.party_name.value.strip(),
@@ -537,16 +676,30 @@ class MassingModal(discord.ui.Modal, title="⚔️ Tạo Massing"):
             "creator": interaction.user.id,
             "creator_name": interaction.user.display_name
         }
-        active_parties[party_id] = party_data
-        view = PartyView(party_id)
-        await interaction.response.send_message(embed=build_party_embed(party_data), view=view)
-        msg = await interaction.original_response()
-        active_parties[str(msg.id)] = active_parties.pop(party_id)
-        active_parties[str(msg.id)]["id"] = str(msg.id)
-        view.party_id = str(msg.id)
-        view.rebuild_buttons()  # FIX: đồng bộ custom_id nút bấm với msg.id mới
-        await save_massing()
-        await msg.edit(embed=build_party_embed(active_parties[str(msg.id)]), view=view)
+        await interaction.response.defer()
+        async with _massing_state_lock:
+            previous_state = deepcopy(active_parties)
+            active_parties[party_id] = party_data
+            view = PartyView(party_id)
+            try:
+                msg = await interaction.followup.send(
+                    embed=build_party_embed(party_data), view=view, wait=True
+                )
+            except Exception as error:
+                active_parties.clear()
+                active_parties.update(previous_state)
+                await interaction.followup.send(f"❌ Không thể gửi party: `{error}`", ephemeral=True)
+                return
+            active_parties[str(msg.id)] = active_parties.pop(party_id)
+            active_parties[str(msg.id)]["id"] = str(msg.id)
+            view.party_id = str(msg.id)
+            view.rebuild_buttons()
+            try:
+                await save_massing(previous_state)
+            except Exception as error:
+                await msg.edit(content=f"❌ Không thể lưu party: `{error}`", embed=None, view=None)
+                return
+            await msg.edit(embed=build_party_embed(active_parties[str(msg.id)]), view=view)
 
 
 class NoteModal(discord.ui.Modal, title="📝 Sửa Ghi chú"):
@@ -564,12 +717,22 @@ class NoteModal(discord.ui.Modal, title="📝 Sửa Ghi chú"):
             self.note_text.default = party["note"]
 
     async def on_submit(self, interaction: discord.Interaction):
-        party = active_parties.get(self.party_id)
-        if not party:
-            return await interaction.response.send_message("❌ Party hết hạn do bot restart.", ephemeral=True)
-        party["note"] = self.note_text.value.strip() if self.note_text.value else ""
-        await save_massing()
-        await interaction.response.edit_message(embed=build_party_embed(party), view=self.parent_view)
+        def mutate(party):
+            party["note"] = self.note_text.value.strip() if self.note_text.value else ""
+            return None
+
+        success, error = await _save_party_after_ack(interaction, self.parent_view, mutate)
+        if not success:
+            restored = active_parties.get(self.party_id)
+            await interaction.edit_original_response(
+                embed=build_party_embed(restored) if restored else None,
+                view=self.parent_view if restored else None,
+            )
+            await interaction.followup.send(f"❌ Không thể lưu ghi chú: `{error}`", ephemeral=True)
+            return
+        await interaction.edit_original_response(
+            embed=build_party_embed(active_parties[self.party_id]), view=self.parent_view
+        )
 
 
 class ConfirmOverwriteTemplateView(discord.ui.View):
@@ -579,17 +742,25 @@ class ConfirmOverwriteTemplateView(discord.ui.View):
         self.key = key
         self.party = party
 
-    @discord.ui.button(label="✅ Ghi đè", style=discord.ButtonStyle.danger)
     async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
-        templates = load_templates()
-        templates[self.key] = {
-            "display_name": self.name,
-            "roles": self.party["roles"],
-            "weapon_slots": self.party["weapon_slots"],
-            "note": self.party.get("note", "")
-        }
-        await save_templates(templates)
-        await interaction.response.edit_message(content=f"✅ Đã ghi đè template **{self.name}**!", view=None)
+        if not _templates_loaded:
+            return await interaction.response.send_message("❌ Kho template chưa tải được.", ephemeral=True)
+        await interaction.response.defer(ephemeral=True)
+        async with _massing_state_lock:
+            templates = deepcopy(active_templates)
+            templates[self.key] = {
+                "display_name": self.name,
+                "roles": self.party["roles"],
+                "weapon_slots": self.party["weapon_slots"],
+                "note": self.party.get("note", "")
+            }
+            try:
+                await save_templates(templates)
+            except Exception as error:
+                return await interaction.followup.send(f"❌ Không thể lưu template: `{error}`", ephemeral=True)
+            await interaction.edit_original_response(
+                content=f"✅ Đã ghi đè template **{self.name}**!", view=None
+            )
 
     @discord.ui.button(label="❌ Hủy", style=discord.ButtonStyle.secondary)
     async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -603,25 +774,34 @@ class SaveTemplateModal(discord.ui.Modal, title="💾 Lưu Template"):
 
     def __init__(self, party):
         super().__init__()
-        self.party = party
+        self.party = deepcopy(party)
 
     async def on_submit(self, interaction: discord.Interaction):
+        if not _templates_loaded:
+            return await interaction.response.send_message("❌ Kho template chưa tải được.", ephemeral=True)
         name = self.template_name.value.strip()
         key = name.lower()
-        templates = load_templates()
-        if key in templates:
-            view = ConfirmOverwriteTemplateView(name, key, self.party)
-            return await interaction.response.send_message(
-                f"⚠️ Template **{name}** đã tồn tại. Bạn có muốn ghi đè không?", view=view, ephemeral=True
-            )
-        templates[key] = {
-            "display_name": name,
-            "roles": self.party["roles"],
-            "weapon_slots": self.party["weapon_slots"],
-            "note": self.party.get("note", "")
-        }
-        await save_templates(templates)
-        await interaction.response.send_message(f"✅ Đã lưu template **{name}**!", ephemeral=True)
+        await interaction.response.defer(ephemeral=True)
+        async with _massing_state_lock:
+            if key in active_templates:
+                view = ConfirmOverwriteTemplateView(name, key, self.party)
+                return await interaction.followup.send(
+                    f"⚠️ Template **{name}** đã tồn tại. Bạn có muốn ghi đè không?",
+                    view=view,
+                    ephemeral=True,
+                )
+            templates = deepcopy(active_templates)
+            templates[key] = {
+                "display_name": name,
+                "roles": self.party["roles"],
+                "weapon_slots": self.party["weapon_slots"],
+                "note": self.party.get("note", "")
+            }
+            try:
+                await save_templates(templates)
+            except Exception as error:
+                return await interaction.followup.send(f"❌ Không thể lưu template: `{error}`", ephemeral=True)
+            await interaction.edit_original_response(content=f"✅ Đã lưu template **{name}**.")
 
 
 class PingAllModal(discord.ui.Modal, title="📢 Ping All Party"):
@@ -646,42 +826,69 @@ class MassingCog(commands.Cog):
         self.bot = bot
 
     async def cog_load(self):
-        """Khôi phục các party Massing sau khi bot restart (đăng ký lại nút với Discord)."""
-        loaded = load_massing()
-        if not loaded:
-            return
-        active_parties.update(loaded)
+        """Khôi phục party/template state trước khi các event dùng tới."""
+        global _massing_loaded, _templates_loaded
+        _massing_loaded = False
+        _templates_loaded = False
+        try:
+            loaded_parties = await load_massing()
+            if not isinstance(loaded_parties, dict):
+                raise ValueError("Dữ liệu Massing không phải object.")
+            active_parties.clear()
+            active_parties.update(loaded_parties)
+            _massing_loaded = True
+        except Exception as error:
+            print(f"❌ Không tải được Massing; thao tác ghi bị khóa: {error}")
+        try:
+            loaded_templates = await load_templates()
+            if not isinstance(loaded_templates, dict):
+                raise ValueError("Dữ liệu template không phải object.")
+            active_templates.clear()
+            active_templates.update(loaded_templates)
+            _templates_loaded = True
+        except Exception as error:
+            print(f"❌ Không tải được template; thao tác ghi bị khóa: {error}")
+
         restored = 0
-        for pid in list(active_parties.keys()):
-            try:
-                self.bot.add_view(PartyView(pid))
-                restored += 1
-            except Exception as e:
-                print(f"⚠️ Không khôi phục được party {pid}: {e}")
+        if _massing_loaded:
+            for pid in active_parties:
+                try:
+                    self.bot.add_view(PartyView(pid))
+                    restored += 1
+                except Exception as error:
+                    print(f"⚠️ Không khôi phục được party {pid}: {error}")
         print(f"🔄 Đã khôi phục {restored} party Massing sau restart!")
-        self.weekly_clear_parties.start()  # Bắt đầu task tự dọn party hàng tuần
+        if not self.weekly_clear_parties.is_running():
+            self.weekly_clear_parties.start()
 
     async def cog_unload(self):
         self.weekly_clear_parties.cancel()
 
     @tasks.loop(hours=168)  # 7 ngày = 168 giờ
     async def weekly_clear_parties(self):
-        """Tự động xóa toàn bộ party Massing đang active mỗi 7 ngày.
-        Templates không bị đụng — chỉ xóa được bằng /masstemplatedelete."""
-        count = len(active_parties)
-        active_parties.clear()
-        await save_massing()
-        print(f"🧹 [Auto-Clean] Đã xóa {count} party Massing cũ sau 7 ngày.")
+        """Tự động xóa toàn bộ party Massing đang active mỗi 7 ngày."""
+        async with _massing_state_lock:
+            if not _massing_loaded:
+                return
+            previous_state = deepcopy(active_parties)
+            count = len(active_parties)
+            active_parties.clear()
+            try:
+                await save_massing(previous_state)
+            except Exception as error:
+                print(f"❌ Không thể lưu dọn dẹp Massing; giữ nguyên party: {error}")
+                return
+            print(f"🧹 [Auto-Clean] Đã xóa {count} party Massing cũ sau 7 ngày.")
 
     @weekly_clear_parties.before_loop
     async def before_weekly_clear(self):
         await self.bot.wait_until_ready()
+        await asyncio.sleep(168 * 60 * 60)
 
     async def template_autocomplete(self, interaction: discord.Interaction, current: str):
-        templates = load_templates()
         choices = []
-        for key, t in templates.items():
-            name = t.get("display_name", key)
+        for key, template in active_templates.items():
+            name = template.get("display_name", key)
             if current.lower() in name.lower():
                 choices.append(app_commands.Choice(name=name, value=key))
         return choices[:25]
@@ -690,32 +897,48 @@ class MassingCog(commands.Cog):
     @app_commands.describe(template="Dùng template đã lưu (không bắt buộc, để trống nếu tạo mới hoàn toàn)")
     @app_commands.autocomplete(template=template_autocomplete)
     async def massing_slash(self, interaction: discord.Interaction, template: str = None):
+        if not _massing_loaded:
+            return await interaction.response.send_message(
+                "❌ Kho Massing chưa tải được; không thể tạo party an toàn.", ephemeral=True
+            )
+        if template and not _templates_loaded:
+            return await interaction.response.send_message("❌ Kho template chưa tải được.", ephemeral=True)
+        if template:
+            selected = active_templates.get(template.lower())
+            if not selected:
+                return await interaction.response.send_message(
+                    f"❌ Không tìm thấy template `{template}`!", ephemeral=True
+                )
+            roles_text = format_role_block(selected.get("roles", []), selected.get("weapon_slots", {}))
+            modal = MassingModal(prefill_roles=roles_text, prefill_note=selected.get("note", ""))
+        else:
+            modal = MassingModal()
         try:
-            if template:
-                templates = load_templates()
-                t = templates.get(template.lower())
-                if not t:
-                    return await interaction.response.send_message(f"❌ Không tìm thấy template `{template}`!", ephemeral=True)
-                roles_text = format_role_block(t.get("roles", []), t.get("weapon_slots", {}))
-                modal = MassingModal(prefill_roles=roles_text, prefill_note=t.get("note", ""))
-            else:
-                modal = MassingModal()
             await interaction.response.send_modal(modal)
-        except discord.HTTPException:
-            pass
+        except discord.HTTPException as error:
+            if not interaction.response.is_done():
+                await interaction.response.send_message(f"❌ Không thể mở form Massing: `{error}`", ephemeral=True)
 
     @app_commands.command(name="masstemplatelist", description="Xem danh sách template Massing hiện có")
     async def masstemplatelist_cmd(self, interaction: discord.Interaction):
-        templates = load_templates()
+        if not _templates_loaded:
+            return await interaction.response.send_message("❌ Kho template chưa tải được.", ephemeral=True)
+        templates = active_templates
         if not templates:
             return await interaction.response.send_message("📋 Chưa có template nào được lưu.", ephemeral=True)
         lines = []
-        for key, t in templates.items():
-            name = t.get("display_name", key)
-            role_count = len(t.get("roles", []))
-            slot_count = sum(limit for wlist in t.get("weapon_slots", {}).values() for _, limit in wlist)
+        for key, template_data in templates.items():
+            name = template_data.get("display_name", key)
+            role_count = len(template_data.get("roles", []))
+            slot_count = sum(
+                limit for wlist in template_data.get("weapon_slots", {}).values() for _, limit in wlist
+            )
             lines.append(f"• **{name}** — {role_count} role, {slot_count} slot")
-        embed = discord.Embed(title=f"📋 Template Massing ({len(templates)})", description="\n".join(lines), color=0x3498db)
+        embed = discord.Embed(
+            title=f"📋 Template Massing ({len(templates)})",
+            description="\n".join(lines),
+            color=0x3498db,
+        )
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
     @app_commands.command(name="masstemplatedelete", description="Xóa template Massing (Officer only)")
@@ -724,14 +947,24 @@ class MassingCog(commands.Cog):
     async def masstemplatedelete_cmd(self, interaction: discord.Interaction, template: str):
         if not is_officer(interaction.user):
             return await interaction.response.send_message("❌ Chỉ Officer mới dùng được lệnh này!", ephemeral=True)
-        templates = load_templates()
+        if not _templates_loaded:
+            return await interaction.response.send_message("❌ Kho template chưa tải được.", ephemeral=True)
         key = template.lower()
-        if key not in templates:
-            return await interaction.response.send_message(f"❓ Không tìm thấy template `{template}`.", ephemeral=True)
-        name = templates[key].get("display_name", template)
-        del templates[key]
-        await save_templates(templates)
-        await interaction.response.send_message(f"🧹 Đã xóa template **{name}**.", ephemeral=True)
+        await interaction.response.defer(ephemeral=True)
+        async with _massing_state_lock:
+            existing = active_templates.get(key)
+            if not existing:
+                return await interaction.followup.send(
+                    f"❓ Không tìm thấy template `{template}`.", ephemeral=True
+                )
+            name = existing.get("display_name", template)
+            updated = deepcopy(active_templates)
+            del updated[key]
+            try:
+                await save_templates(updated)
+            except Exception as error:
+                return await interaction.followup.send(f"❌ Không thể xóa template: `{error}`", ephemeral=True)
+            await interaction.edit_original_response(content=f"🧹 Đã xóa template **{name}**.")
 
 
 async def setup(bot: commands.Bot):

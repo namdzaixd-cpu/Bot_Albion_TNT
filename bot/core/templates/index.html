@@ -772,7 +772,7 @@
             <div class="nav-links">
                 <a href="#modules">Module</a>
                 <a href="#architecture">Kiến trúc</a>
-                <a href="#commands">34 lệnh</a>
+                <a href="#commands">Lệnh</a>
                 <a href="#stack">Công nghệ</a>
                 <a href="https://github.com/namdzaixd-cpu/Bot_Albion_TNT" target="_blank" rel="noreferrer">GitHub ↗</a>
             </div>
@@ -794,7 +794,7 @@
                         tiếp nhận thành viên, tổ chức đội hình, theo dõi đóng góp, kiểm tra guild, đọc voice và quản lý Core-Bank.
                     </p>
                     <div class="hero-actions">
-                        <a class="button button-primary" href="#commands">Tra cứu 34 lệnh</a>
+                        <a class="button button-primary" href="#commands">Tra cứu lệnh</a>
                         <a class="button button-secondary" href="https://github.com/namdzaixd-cpu/Bot_Albion_TNT" target="_blank" rel="noreferrer">Xem mã nguồn ↗</a>
                         <a class="button button-secondary" href="https://discord.gg/PhMqCskBJ" target="_blank" rel="noreferrer">Discord TNC ↗</a>
                     </div>
@@ -1045,9 +1045,9 @@
         <section id="commands">
             <div class="section-shell">
                 <p class="eyebrow">Command matrix</p>
-                <h2>34 lệnh đang được nạp</h2>
+                <h2>Lệnh công khai</h2>
                 <p class="section-intro">
-                    Danh sách này lấy từ command decorator của 7 nhóm lệnh production. LastSeen và Discord Sync chạy nền nên không xuất hiện ở đây.
+                    Danh sách các lệnh tương tác hiện được nạp. Tính năng chạy nền không xuất hiện ở đây.
                 </p>
                 <div class="command-toolbar" aria-label="Tra cứu ma trận lệnh">
                     <label class="command-search-label" for="command-search">
@@ -1062,9 +1062,10 @@
                         <button class="command-filter" type="button" data-command-filter="massing" aria-pressed="false">Massing</button>
                         <button class="command-filter" type="button" data-command-filter="guildcheck" aria-pressed="false">GuildCheck</button>
                         <button class="command-filter" type="button" data-command-filter="alo" aria-pressed="false">ALO</button>
+                        <button class="command-filter" type="button" data-command-filter="translator" aria-pressed="false">Update Translator</button>
                         <button class="command-filter" type="button" data-command-filter="corebank" aria-pressed="false">Core-Bank</button>
                     </div>
-                    <p class="command-summary command-result" id="command-result" aria-live="polite">34 / 34 lệnh</p>
+                    <p class="command-summary command-result" id="command-result" aria-live="polite">Các lệnh đang hiển thị</p>
                 </div>
                 <table class="command-table">
                     <thead>
@@ -1185,6 +1186,16 @@
                             <td><span class="command-system">GuildCheck</span></td>
                             <td>Liệt kê thành viên Discord mới gia nhập trong số ngày chỉ định.</td>
                         </tr>
+                        <tr data-command="/guildmembers" data-system="guildcheck">
+                            <td><code>/guildmembers</code></td>
+                            <td><span class="command-system">GuildCheck</span></td>
+                            <td>Liệt kê thành viên của guild Albion và tùy chọn sắp xếp hoặc xuất danh sách.</td>
+                        </tr>
+                        <tr data-command="/guildaudit" data-system="guildcheck">
+                            <td><code>/guildaudit</code></td>
+                            <td><span class="command-system">GuildCheck</span></td>
+                            <td>Đối soát thành viên trong guild Albion với thành viên Discord.</td>
+                        </tr>
                         <tr data-command="/alojoin" data-system="alo">
                             <td><code>/alojoin</code></td>
                             <td><span class="command-system">ALO TTS</span></td>
@@ -1244,6 +1255,16 @@
                             <td><code>/corelist</code></td>
                             <td><span class="command-system">Core-Bank</span></td>
                             <td>Xem danh sách emoji, giá trị và cấu hình Core-Bank hiện tại.</td>
+                        </tr>
+                        <tr data-command="/utconfig" data-system="translator">
+                            <td><code>/utconfig</code></td>
+                            <td><span class="command-system">Update Translator</span></td>
+                            <td>Cấu hình kênh cập nhật được theo dõi và trạng thái dịch.</td>
+                        </tr>
+                        <tr data-command="/utstatus" data-system="translator">
+                            <td><code>/utstatus</code></td>
+                            <td><span class="command-system">Update Translator</span></td>
+                            <td>Xem cấu hình kênh và trạng thái dịch hiện tại.</td>
                         </tr>
                     </tbody>
                 </table>
@@ -1370,6 +1391,7 @@
                     applyCommandFilter();
                 });
             });
+            applyCommandFilter();
 
             if ("IntersectionObserver" in window && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
                 const revealTargets = document.querySelectorAll(

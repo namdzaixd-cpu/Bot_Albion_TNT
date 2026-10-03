@@ -1,12 +1,9 @@
+"""Create legacy Discord tables using an explicitly supplied PostgreSQL URL."""
+
 import os
-import psycopg2
-from dotenv import load_dotenv
 
-load_dotenv()
 
-direct_url = "postgresql://postgres:Namtranpro2252.@db.woxqipelqbyqvvdqczuj.supabase.co:5432/postgres"
-
-sql = """
+SQL = """
 CREATE TABLE IF NOT EXISTS chat_history (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL,
@@ -34,18 +31,29 @@ CREATE TABLE IF NOT EXISTS discord_roles (
 );
 """
 
-def run():
-    print(f"Connecting to {direct_url}...")
+
+def run(connect=None) -> int:
+    database_url = os.getenv("DIRECT_URL") or os.getenv("DATABASE_URL")
+    if not database_url:
+        print("Error: set DIRECT_URL or DATABASE_URL in the process environment.")
+        return 1
+
     try:
-        conn = psycopg2.connect(direct_url)
-        conn.autocommit = True
-        cur = conn.cursor()
-        cur.execute(sql)
-        print("✅ Tables created successfully!")
-        cur.close()
-        conn.close()
-    except Exception as e:
-        print(f"❌ Error: {e}")
+        if connect is None:
+            import psycopg
+
+            connect = psycopg.connect
+        with connect(database_url) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(SQL)
+        print("Tables created successfully.")
+        return 0
+    except ImportError:
+        print("Error: the psycopg package is required to create tables.")
+    except Exception as exc:
+        print(f"Table creation failed ({type(exc).__name__}).")
+    return 1
+
 
 if __name__ == "__main__":
-    run()
+    raise SystemExit(run())

@@ -4,6 +4,16 @@ Nhật ký tiến độ và các mốc phát triển của dự án TNC Manager 
 
 ---
 
+## 2026-10-04: Sửa toàn bộ findings F01–F36
+
+- Mã nguồn: ledger CoreBank/đối soát/refund snapshot, transaction SP, async DB/storage, reload/auth/cache/guild contract, restart/concurrency và interaction ACK.
+- Dashboard: token redaction, serialized partial autosave, status/error states, same-origin blacklist và overview refresh sau partial apply.
+- Kiểm chứng: 41 Python files compile; 61 tests pass; Next.js production build; PostgreSQL disposable rollback/concurrency/permissions; API handlers và browser UI thật với synthetic boundaries.
+- Chưa rollout production hoặc xác nhận rotate credential đã lộ; không gọi bot/payment API thật và không thay `.env` production.
+- [Ma trận F01–F36](tasks/2026-10-04_full_project_fixes/02_task.md), [bằng chứng và giới hạn](tasks/2026-10-04_full_project_fixes/03_walkthrough.md), [cơ chế vận hành](features/data_integrity_and_runtime.md).
+
+---
+
 ## 📅 2026-09-22: Tối Ưu & Thu Gọn Luồng Apply Onboarding (In-Place Edit)
 - **Mục tiêu:** Khắc phục tình trạng thread apply bị dài và spam 3-4 Embed duplicate bằng việc cập nhật tại chỗ trên đúng 1 tin nhắn duy nhất.
 - **Thay đổi chính:**

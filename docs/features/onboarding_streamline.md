@@ -19,3 +19,12 @@
 4. **Bước 3 — Officer duyệt hoặc từ chối:**
    - Khi bấm `[Accept]`: Embed chuyển sang màu Xanh lá (`✅ Đã duyệt`), khóa nút, cấp role và gửi tin nhắn chúc mừng.
    - Khi bấm `[Từ chối]`: Embed chuyển sang màu Đỏ (`❌ Đã từ chối`), khóa nút.
+
+## 3. Identity, restart và lỗi lưu cấu hình
+
+- Embed gốc giữ URL marker `https://discord.com/channels/<guild_id>/<thread_id>` xuyên suốt các lần đổi tiêu đề/trạng thái. Tin nhắn mới trong đơn đã có report không tạo report hoặc ping Officer trùng.
+- Xử lý một thread được khóa riêng; hai ảnh/tin đến đồng thời không tạo hai report.
+- Persistent `OfficerApprovalView` được khôi phục theo `message_id` và trạng thái của từng đơn. Không dùng một view chung để disable nút của đơn khác.
+- Cấu hình dùng async DB APIs; load lỗi giữ trạng thái chưa sẵn sàng, không dùng kho rỗng để ghi đè. `/recuibot list` báo không đọc được cấu hình thay vì hiển thị mặc định giả.
+- Năm sinh: `2000 → 2k`, `2005 → 2k5`, `2010 → 2k10`, `2024 → 2k24`.
+

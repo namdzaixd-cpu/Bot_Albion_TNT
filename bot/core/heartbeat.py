@@ -1,5 +1,5 @@
 """
-heartbeat.py — Bot đập tim định kỳ lên Supabase (bảng bot_status).
+heartbeat.py — Bot ghi trạng thái gateway vào Supabase json_storage.
 
 Web dashboard đọc bảng này để biết bot có đang online hay không,
 thay vì hiện chữ "online" giả. Nếu bot chết > 90s không đập tim,
@@ -7,11 +7,13 @@ dashboard tự nhận là offline (xem web_dashboard/src/app/api/bot-status).
 """
 from __future__ import annotations
 
+import asyncio
+import math
 import os
 import logging
 from datetime import datetime, timezone
 
-from core.storage import save_json
+from core.storage import save_json_async
 
 logger = logging.getLogger("bot.heartbeat")
 
@@ -24,26 +26,29 @@ HEARTBEAT_INTERVAL = 60  # giây
 
 async def _heartbeat(bot) -> None:
     """Ghi trạng thái bot vào Supabase mỗi HEARTBEAT_INTERVAL giây."""
-    import asyncio
     await bot.wait_until_ready()
     while not bot.is_closed():
         try:
             latency = bot.latency
-            latency_ms = None if latency == float("inf") else round(latency * 1000)
+            latency_ms = round(latency * 1000) if math.isfinite(latency) else None
             payload = {
-                "online": True,
+                "online": bool(bot.is_ready()),
                 "last_seen": datetime.now(timezone.utc).isoformat(),
                 "latency_ms": latency_ms,
                 "shard_id": getattr(bot, "shard_id", None),
             }
             # Lưu vào json_storage (key = tnc_bot_status.json)
             # Dashboard sẽ đọc qua API /api/bot-status
-            save_json(payload, STATUS_FILE)
+            await save_json_async(payload, STATUS_FILE)
         except Exception as exc:  # noqa: BLE001
             logger.warning("Heartbeat lỗi: %s", exc)
         await asyncio.sleep(HEARTBEAT_INTERVAL)
 
 
-def start(bot) -> None:
-    bot.loop.create_task(_heartbeat(bot))
-    logger.info("Heartbeat đã khởi chạy (mỗi %ds)", HEARTBEAT_INTERVAL)
+def start(bot) -> asyncio.Task:
+    task = getattr(bot, "_heartbeat_task", None)
+    if task is None or task.done():
+        task = bot.loop.create_task(_heartbeat(bot))
+        bot._heartbeat_task = task
+        logger.info("Heartbeat đã khởi chạy (mỗi %ds)", HEARTBEAT_INTERVAL)
+    return task

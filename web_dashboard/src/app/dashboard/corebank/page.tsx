@@ -1,41 +1,41 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { Package, Save, Eye, EyeOff, Settings2, Trash2, Plus } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Package, Eye, EyeOff, Settings2, Trash2, Plus } from "lucide-react";
 import SearchableSelect, { Option } from "@/components/SearchableSelect";
 import { toast } from "react-hot-toast";
 
 export default function CoreBankDashboard() {
   const [channels, setChannels] = useState<Option[]>([]);
   const [showToken, setShowToken] = useState(false);
-  
+  const [tokenDraft, setTokenDraft] = useState("");
+
   const [config, setConfig] = useState({
     core_channel_id: "",
     bank_channel_id: "",
-    unbelievaboat_token: "",
+    token_configured: false,
     auto_react: true,
     emoji_map: {} as Record<string, { name: string; value: number; display: string; order: number }>
   });
 
   const [newEmoji, setNewEmoji] = useState({ key: "", name: "", value: "", display: "", order: "0" });
+  const saveQueue = useRef<Promise<void>>(Promise.resolve());
 
   useEffect(() => {
-    // Fetch Channels
     fetch('/api/discord-data')
       .then(res => res.json())
       .then(data => {
         if (data.channels) setChannels(data.channels);
       });
 
-    // Fetch Config
     fetch('/api/corebank')
       .then(res => res.json())
       .then(data => {
-        if (data) {
+        if (data && !data.error) {
           setConfig({
             core_channel_id: data.core_channel_id || "",
             bank_channel_id: data.bank_channel_id || "",
-            unbelievaboat_token: data.unbelievaboat_token || "",
+            token_configured: data.token_configured === true,
             auto_react: data.auto_react ?? true,
             emoji_map: data.emoji_map || {}
           });
@@ -43,27 +43,47 @@ export default function CoreBankDashboard() {
       });
   }, []);
 
-  const autoSave = async (newConfig: any) => {
-    try {
-      const res = await fetch('/api/corebank', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newConfig)
-      });
-      if (res.ok) {
+  const queueSave = (patch: Record<string, unknown>) => {
+    const save = async () => {
+      try {
+        const response = await fetch('/api/corebank', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(patch)
+        });
+        const payload: unknown = await response.json().catch(() => null);
+        const result = payload && typeof payload === 'object' ? payload : {};
+        const saved = Reflect.get(result, 'saved') === true;
+        const applied = Reflect.get(result, 'applied') === true;
+        const error = Reflect.get(result, 'error');
+
+        if (saved && 'unbelievaboat_token' in patch) {
+          const configured = Reflect.get(result, 'token_configured') === true;
+          const submittedToken = patch.unbelievaboat_token;
+          setConfig(previous => ({ ...previous, token_configured: configured }));
+          setTokenDraft(previous => previous === submittedToken ? "" : previous);
+        }
+        if (!response.ok || !applied) {
+          toast.error(typeof error === 'string' ? error : "Lỗi lưu cấu hình CoreBank!", { position: 'bottom-right' });
+          return;
+        }
         toast.success("Đã tự động lưu cấu hình CoreBank!", { position: 'bottom-right' });
-      } else {
-        toast.error("Lỗi lưu cấu hình CoreBank!", { position: 'bottom-right' });
+      } catch {
+        toast.error("Lỗi mạng!", { position: 'bottom-right' });
       }
-    } catch (err) {
-      toast.error("Lỗi mạng!", { position: 'bottom-right' });
-    }
+    };
+    saveQueue.current = saveQueue.current.then(save, save);
   };
 
-  const handleChange = (key: string, value: any) => {
-    const newConfig = { ...config, [key]: value };
-    setConfig(newConfig);
-    autoSave(newConfig);
+  const handleChange = (key: 'core_channel_id' | 'bank_channel_id' | 'auto_react', value: string | boolean) => {
+    if (key === 'auto_react') {
+      if (typeof value !== 'boolean') return;
+      setConfig(previous => ({ ...previous, auto_react: value }));
+    } else {
+      if (typeof value !== 'string') return;
+      setConfig(previous => ({ ...previous, [key]: value }));
+    }
+    queueSave({ [key]: value });
   };
 
   const handleAddEmoji = () => {
@@ -71,35 +91,34 @@ export default function CoreBankDashboard() {
       toast.error("Vui lòng nhập đủ ID/Emoji, Tên và Giá trị!");
       return;
     }
-    const val = parseInt(newEmoji.value);
-    if (isNaN(val) || val <= 0) {
+    const value = parseInt(newEmoji.value);
+    if (isNaN(value) || value <= 0) {
       toast.error("Giá trị không hợp lệ!");
       return;
     }
-    
-    // Đơn giản hóa hiển thị (nếu là chuỗi custom emoji thì bóc tách, tạm thời dùng key)
-    const display = newEmoji.display || newEmoji.key;
-    
-    const newMap = { ...config.emoji_map };
-    newMap[newEmoji.key] = {
+
+    const key = newEmoji.key;
+    const emoji = {
       name: newEmoji.name,
-      value: val,
-      display: display,
+      value,
+      display: newEmoji.display || key,
       order: parseInt(newEmoji.order) || 0
     };
-    
-    const newConfig = { ...config, emoji_map: newMap };
-    setConfig(newConfig);
-    autoSave(newConfig);
+    setConfig(previous => ({
+      ...previous,
+      emoji_map: { ...previous.emoji_map, [key]: emoji }
+    }));
+    queueSave({ emoji_operation: 'set', key, value: emoji });
     setNewEmoji({ key: "", name: "", value: "", display: "", order: "0" });
   };
 
   const handleRemoveEmoji = (key: string) => {
-    const newMap = { ...config.emoji_map };
-    delete newMap[key];
-    const newConfig = { ...config, emoji_map: newMap };
-    setConfig(newConfig);
-    autoSave(newConfig);
+    setConfig(previous => {
+      const emojiMap = { ...previous.emoji_map };
+      delete emojiMap[key];
+      return { ...previous, emoji_map: emojiMap };
+    });
+    queueSave({ emoji_operation: 'remove', key });
   };
 
   return (
@@ -148,12 +167,19 @@ export default function CoreBankDashboard() {
                 <div className="relative">
                   <input
                     type={showToken ? "text" : "password"}
-                    value={config.unbelievaboat_token}
-                    onChange={(e) => setConfig({ ...config, unbelievaboat_token: e.target.value })}
-                    onBlur={(e) => autoSave({ ...config, unbelievaboat_token: e.target.value })}
+                    value={tokenDraft}
+                    onChange={(event) => setTokenDraft(event.target.value)}
+                    onBlur={(event) => {
+                      if (event.currentTarget.value) {
+                        queueSave({ unbelievaboat_token: event.currentTarget.value });
+                      }
+                    }}
                     className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-primary pr-10"
-                    placeholder="Nhập API Token..."
+                    placeholder={config.token_configured ? "Đã cấu hình — nhập token mới để thay" : "Nhập API Token..."}
                   />
+                  {config.token_configured && (
+                    <p className="mt-1 text-xs text-green-400">Token đã được cấu hình; để trống sẽ giữ nguyên.</p>
+                  )}
                   <button 
                     onClick={() => setShowToken(!showToken)}
                     className="absolute right-3 top-1/2 -translate-y-1/2 text-text-muted hover:text-white"

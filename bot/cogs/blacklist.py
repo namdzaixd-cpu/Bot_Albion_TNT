@@ -6,12 +6,12 @@ import aiohttp
 from typing import Optional
 
 from core.permissions import is_officer
-from core.database import execute
+from core.db import async_execute
 
 class GlobalBlacklist:
-    def check_blacklist(self, discord_id: str, ingame_id: str) -> Optional[dict]:
+    async def check_blacklist(self, discord_id: str, ingame_id: str) -> Optional[dict]:
         try:
-            res, err = execute(lambda c: c.table("blacklist").select("*")
+            res, err = await async_execute(lambda c: c.table("blacklist").select("*")
                                .or_(f"discord_id.eq.{discord_id},ingame_id.eq.{ingame_id}"))
             if err:
                 print(f"[Error] Lỗi khi check_blacklist Supabase: {err}")
@@ -22,7 +22,7 @@ class GlobalBlacklist:
             print(f"[Error] Lỗi khi check_blacklist Supabase: {e}")
         return None
 
-    def add_entry(self, discord_id: str, ingame_name: str, ingame_id: str, reason: str, officer_id: str, guild_id: str):
+    async def add_entry(self, discord_id: str, ingame_name: str, ingame_id: str, reason: str, officer_id: str, guild_id: str) -> bool:
         try:
             new_entry = {
                 "discord_id": str(discord_id),
@@ -33,32 +33,36 @@ class GlobalBlacklist:
                 "source_guild_id": str(guild_id),
                 "timestamp": datetime.datetime.utcnow().isoformat() + "Z"
             }
-            _, err = execute(lambda c: c.table("blacklist").upsert(new_entry))
+            _, err = await async_execute(lambda c: c.table("blacklist").upsert(new_entry))
             if err:
                 print(f"[Error] Lỗi khi add_entry Supabase: {err}")
+                return False
+            return True
         except Exception as e:
             print(f"[Error] Lỗi khi add_entry Supabase: {e}")
+            return False
 
-    def remove_entry(self, identifier: str) -> bool:
+    async def remove_entry(self, identifier: str) -> bool:
         try:
-            res, err = execute(lambda c: c.table("blacklist").select("*")
+            res, err = await async_execute(lambda c: c.table("blacklist").select("*")
                                .or_(f"discord_id.eq.{identifier},ingame_name.ilike.{identifier}"))
             if err:
                 print(f"[Error] Lỗi khi remove_entry query: {err}")
                 return False
             if res and res.data:
                 for entry in res.data:
-                    _, e2 = execute(lambda c: c.table("blacklist").delete().eq("discord_id", entry["discord_id"]))
+                    _, e2 = await async_execute(lambda c: c.table("blacklist").delete().eq("discord_id", entry["discord_id"]))
                     if e2:
                         print(f"[Error] Lỗi khi delete entry: {e2}")
+                        return False
                 return True
         except Exception as e:
             print(f"[Error] Lỗi khi remove_entry Supabase: {e}")
         return False
 
-    def get_all(self):
+    async def get_all(self):
         try:
-            res, err = execute(lambda c: c.table("blacklist").select("*"))
+            res, err = await async_execute(lambda c: c.table("blacklist").select("*"))
             if err:
                 print(f"[Error] Lỗi khi get_all Supabase: {err}")
                 return []
@@ -106,7 +110,7 @@ class BlacklistCog(commands.Cog):
             
         ingame_id = player_data["Id"]
         
-        self.blacklist_db.add_entry(
+        success = await self.blacklist_db.add_entry(
             discord_id=user.id,
             ingame_name=player_data["Name"],
             ingame_id=ingame_id,
@@ -114,6 +118,9 @@ class BlacklistCog(commands.Cog):
             officer_id=interaction.user.id,
             guild_id=interaction.guild.id
         )
+        if not success:
+            await interaction.followup.send("❌ Không lưu được blacklist; vui lòng thử lại khi DB hoạt động.")
+            return
         
         embed = discord.Embed(title="🚨 Đã thêm vào Blacklist", color=discord.Color.red())
         embed.add_field(name="Discord", value=f"<@{user.id}> ({user.id})", inline=False)
@@ -130,11 +137,12 @@ class BlacklistCog(commands.Cog):
             await interaction.response.send_message("❌ Xin lỗi, chỉ Officer trở lên mới được quyền dùng lệnh này!", ephemeral=True)
             return
             
-        success = self.blacklist_db.remove_entry(identifier)
+        await interaction.response.defer(ephemeral=True)
+        success = await self.blacklist_db.remove_entry(identifier)
         if success:
-            await interaction.response.send_message(f"✅ Đã gỡ bỏ `{identifier}` khỏi Blacklist.", ephemeral=True)
+            await interaction.followup.send(f"✅ Đã gỡ bỏ `{identifier}` khỏi Blacklist.", ephemeral=True)
         else:
-            await interaction.response.send_message(f"⚠️ Không tìm thấy ai có ID hoặc Tên là `{identifier}` trong Blacklist.", ephemeral=True)
+            await interaction.followup.send(f"⚠️ Không xóa được hoặc không tìm thấy `{identifier}` trong Blacklist.", ephemeral=True)
 
 
     @blacklist_group.command(name="view", description="Xem danh sách đen hiện tại")
@@ -143,9 +151,10 @@ class BlacklistCog(commands.Cog):
             await interaction.response.send_message("❌ Xin lỗi, chỉ Officer trở lên mới được quyền xem Blacklist!", ephemeral=True)
             return
             
-        entries = self.blacklist_db.get_all()
+        await interaction.response.defer(ephemeral=True)
+        entries = await self.blacklist_db.get_all()
         if not entries:
-            await interaction.response.send_message("✅ Danh sách đen hiện đang trống.", ephemeral=True)
+            await interaction.followup.send("✅ Danh sách đen hiện đang trống.", ephemeral=True)
             return
             
         embed = discord.Embed(title="📜 Global Blacklist", color=discord.Color.dark_red())
@@ -156,7 +165,7 @@ class BlacklistCog(commands.Cog):
             reason = entry['reason']
             embed.add_field(name=f"Ingame: {ingame}", value=f"Discord: {discord_mention}\nLý do: {reason}", inline=False)
             
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        await interaction.followup.send(embed=embed, ephemeral=True)
 
 
 async def setup(bot: commands.Bot):

@@ -38,10 +38,9 @@ export default function BlacklistDashboard() {
 
     // Tạm thời bỏ qua việc check ID Albion qua API trên web, lưu trực tiếp
     const entryData = {
-      ...newEntry,
-      ingame_id: "N/A (Added via Web)",
-      added_by_discord_id: session?.user?.name || "Web Admin",
-      source_guild_id: "Web Dashboard"
+      discord_id: newEntry.discord_id,
+      ingame_name: newEntry.ingame_name,
+      reason: newEntry.reason
     };
 
     try {

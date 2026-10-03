@@ -3,26 +3,30 @@ db.py — Supabase client wrapper chuẩn cho backend (bot).
 
 Thiết kế:
 - Lazy init: client chỉ tạo khi thực sự dùng (tránh crash lúc import nếu thiếu env).
-- Retry với exponential backoff (mặc định 3 lần) cho mọi thao tác mạng.
-- Timeout mặc định để không treo vô hạn.
-- Structured logging qua module `logging` (không print).
-- Fail rõ ràng: hàm helper trả về (data, error) thay vì raise ngầm.
+- SELECT có retry/backoff; mutation không retry mù khi kết quả chưa rõ.
+- Timeout PostgREST được cấu hình trên client.
+- Structured logging không lộ credential.
+- Helper trả (data, error); storage/config truyền lỗi thay vì default giả.
 
-Không bao giờ dùng anon key ở backend.
+Runtime dùng async_execute; sync helper chỉ dành cho scripts ngoài event loop.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
-import os
+import re
+import threading
 import time
 from typing import Any, Callable, Optional, TypeVar
 
 try:
-    from supabase import Client, create_client
+    from supabase import Client, ClientOptions, create_client
+    from postgrest import SyncMaybeSingleRequestBuilder
 except ImportError:
     Client = Any  # type: ignore
     create_client = None  # type: ignore
-
+    ClientOptions = None  # type: ignore
+    SyncMaybeSingleRequestBuilder = ()  # type: ignore
 from .config import SUPABASE_URL, SUPABASE_KEY
 
 logger = logging.getLogger("bot.db")
@@ -41,35 +45,41 @@ class DBError(Exception):
 _client: Optional[Client] = None
 _initialized = False
 
+_client_lock = threading.Lock()
+
+
+def _error_message(error: Any) -> str:
+    message = str(error)
+    if SUPABASE_KEY:
+        message = message.replace(SUPABASE_KEY, "[redacted]")
+    return re.sub(r"(postgres(?:ql)?://)[^@\s]+@", r"\1[redacted]@", message)
 
 def get_client() -> Optional[Client]:
-    """Trả về Supabase client (singleton), hoặc None nếu chưa cấu hình."""
+    """Khởi tạo client một lần; timeout áp dụng thật cho PostgREST."""
     global _client, _initialized
-    if _initialized:
+    with _client_lock:
+        if _initialized:
+            return _client
+        _initialized = True
+        if not SUPABASE_URL or not SUPABASE_KEY:
+            logger.warning("SUPABASE_URL/KEY chưa cấu hình — DB bị disable.")
+            return None
+        if create_client is None:
+            logger.error("Thiếu thư viện supabase.")
+            return None
+        try:
+            options = ClientOptions(postgrest_client_timeout=DEFAULT_TIMEOUT)
+            _client = create_client(SUPABASE_URL, SUPABASE_KEY, options=options)
+        except Exception as exc:
+            logger.error("Không thể khởi tạo Supabase client: %s", _error_message(exc))
         return _client
-    _initialized = True
-
-    if not SUPABASE_URL or not SUPABASE_KEY:
-        logger.warning("SUPABASE_URL/KEY chưa cấu hình — DB bị disable.")
-        _client = None
-        return None
-    if create_client is None:
-        logger.error("Thiếu thư viện supabase — pip install supabase.")
-        _client = None
-        return None
-
-    try:
-        _client = create_client(SUPABASE_URL, SUPABASE_KEY)
-        logger.info("Supabase client đã khởi tạo (service role).")
-    except Exception as exc:  # noqa: BLE001
-        logger.exception("Không thể khởi tạo Supabase client: %s", exc)
-        _client = None
-    return _client
 
 
 def _with_retry(fn: Callable[[], T], *, retries: int = DEFAULT_RETRIES,
                backoff: float = DEFAULT_BACKOFF) -> T:
     """Chạy fn, tự retry nếu raise. Raise DBError sau khi hết retries."""
+    if retries < 1:
+        raise ValueError("retries phải là số lần thử >= 1")
     last_exc: Optional[Exception] = None
     for attempt in range(1, retries + 1):
         try:
@@ -79,11 +89,11 @@ def _with_retry(fn: Callable[[], T], *, retries: int = DEFAULT_RETRIES,
             wait = backoff * (2 ** (attempt - 1))
             logger.warning(
                 "DB call thất bại (lần %d/%d): %s — retry sau %.2fs",
-                attempt, retries, exc, wait,
+                attempt, retries, _error_message(exc), wait,
             )
             if attempt < retries:
                 time.sleep(wait)
-    raise DBError(f"DB call failed after {retries} attempts: {last_exc}")
+    raise DBError(f"DB call failed after {retries} attempts: {_error_message(last_exc)}")
 
 
 # ── High-level helpers ──────────────────────────────────────────────────────
@@ -103,15 +113,15 @@ def safe_select(table: str, *, columns: str = "*",
             query = query.maybe_single()
         res = _with_retry(lambda: query.execute())
         if res is None:
-            return (None, "query_returned_none")
+            return (None, None) if single else (None, "query_returned_none")
         if getattr(res, "error", None):
-            return (None, str(res.error))
+            return (None, _error_message(res.error))
         return (res.data, None)
     except DBError as e:
-        return (None, str(e))
-    except Exception as e:  # noqa: BLE001
-        logger.exception("safe_select lỗi không mong đợi: %s", e)
-        return (None, str(e))
+        return (None, _error_message(e))
+    except Exception as e:
+        logger.error("safe_select: %s", _error_message(e))
+        return (None, _error_message(e))
 
 
 def safe_upsert(table: str, row: dict, *,
@@ -121,19 +131,16 @@ def safe_upsert(table: str, row: dict, *,
     if client is None:
         return "client_unavailable"
     try:
-        query = client.table(table).upsert(row)
-        # sync client (supabase 2.x) không có .on_conflict(); upsert mặc định đã ghi đè theo PK
-        res = _with_retry(lambda: query.execute())
+        query = client.table(table).upsert(row, on_conflict=on_conflict or "")
+        res = query.execute()
         if res is None:
-            return (None, "query_returned_none")
+            return "query_returned_none"
         if getattr(res, "error", None):
-            return str(res.error)
+            return _error_message(res.error)
         return None
-    except DBError as e:
-        return str(e)
-    except Exception as e:  # noqa: BLE001
-        logger.exception("safe_upsert lỗi không mong đợi: %s", e)
-        return str(e)
+    except Exception as e:
+        logger.error("safe_upsert: %s", _error_message(e))
+        return _error_message(e)
 
 
 def safe_insert(table: str, row: dict) -> Optional[str]:
@@ -141,17 +148,15 @@ def safe_insert(table: str, row: dict) -> Optional[str]:
     if client is None:
         return "client_unavailable"
     try:
-        res = _with_retry(lambda: client.table(table).insert(row).execute())
+        res = client.table(table).insert(row).execute()
         if res is None:
-            return (None, "query_returned_none")
+            return "query_returned_none"
         if getattr(res, "error", None):
-            return str(res.error)
+            return _error_message(res.error)
         return None
-    except DBError as e:
-        return str(e)
-    except Exception as e:  # noqa: BLE001
-        logger.exception("safe_insert lỗi không mong đợi: %s", e)
-        return str(e)
+    except Exception as e:
+        logger.error("safe_insert: %s", _error_message(e))
+        return _error_message(e)
 
 
 def safe_update(table: str, row: dict, *,
@@ -163,38 +168,37 @@ def safe_update(table: str, row: dict, *,
         query = client.table(table).update(row)
         for k, v in filters.items():
             query = query.eq(k, v)
-        res = _with_retry(lambda: query.execute())
+        res = query.execute()
         if res is None:
-            return (None, "query_returned_none")
+            return "query_returned_none"
         if getattr(res, "error", None):
-            return str(res.error)
+            return _error_message(res.error)
         return None
-    except DBError as e:
-        return str(e)
-    except Exception as e:  # noqa: BLE001
-        logger.exception("safe_update lỗi không mong đợi: %s", e)
-        return str(e)
+    except Exception as e:
+        logger.error("safe_update: %s", _error_message(e))
+        return _error_message(e)
 
 
-def execute(query_builder: Callable[[Client], Any]) -> tuple[Optional[Any], Optional[str]]:
-    """Chạy 1 query builder (hàm nhận client → trả query object) với retry.
-
-    Dùng cho các thao tác phức tạp (bulk upsert, delete, order/limit):
-        data, err = execute(lambda c: c.table("x").select("*").execute())
-    """
+def execute(query_builder: Callable[[Client], Any], *,
+            retries: int = 1) -> tuple[Optional[Any], Optional[str]]:
+    """Execute một query chưa gửi; không retry mutation mặc định."""
     client = get_client()
     if client is None:
         return (None, "client_unavailable")
     try:
-        res = _with_retry(lambda: query_builder(client).execute())
+        query = query_builder(client)
+        res = _with_retry(query.execute, retries=retries)
         if res is None:
-            return (None, "query_returned_none")
+            return (None, None) if isinstance(query, SyncMaybeSingleRequestBuilder) else (None, "query_returned_none")
         if getattr(res, "error", None):
-            return (None, str(res.error))
+            return (None, _error_message(res.error))
         return (res, None)
-    except DBError as e:
-        return (None, str(e))
-    except Exception as e:  # noqa: BLE001
-        logger.exception("execute lỗi không mong đợi: %s", e)
-        return (None, str(e))
+    except Exception as exc:
+        return (None, _error_message(exc))
+
+
+async def async_execute(query_builder: Callable[[Client], Any], *,
+                        retries: int = 1) -> tuple[Optional[Any], Optional[str]]:
+    """Chạy query trong worker thread, không giữ event loop Discord."""
+    return await asyncio.to_thread(execute, query_builder, retries=retries)
 

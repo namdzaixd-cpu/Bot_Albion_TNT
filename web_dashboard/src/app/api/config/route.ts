@@ -2,9 +2,18 @@ import { NextResponse } from 'next/server';
 import { supabase } from "@/lib/supabaseServer";
 import { getServerSession } from "next-auth/next";
 import { authOptions, isAdmin } from "@/lib/auth";
+import { GUILD_ID } from "@/lib/guild";
+import { reloadBots } from "@/lib/reloadBots";
 
-// Lấy GUILD_ID từ môi trường
-const GUILD_ID = process.env.DISCORD_GUILD_ID || "712258265769050164";
+const WRITABLE_FIELDS = [
+  'is_onboard_enabled',
+  'apply_channel_id',
+  'question_channel_id',
+  'rules_channel_id',
+  'chat_channel_id',
+  'officer_role_id',
+  'member_role_id',
+] as const;
 
 export async function GET() {
   try {
@@ -16,76 +25,80 @@ export async function GET() {
 
     if (error) {
       if (error.code === 'PGRST116') {
-        // Không tìm thấy bản ghi, có thể bot chưa tạo
-        return NextResponse.json({ 
-          guild_id: GUILD_ID,
-          is_onboard_enabled: false 
-        });
+        return NextResponse.json({ guild_id: GUILD_ID, is_onboard_enabled: false });
       }
       throw error;
     }
 
     return NextResponse.json(data);
-  } catch (error: any) {
-    console.error("Lỗi khi gọi API /api/config:", error.message);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Lỗi không xác định';
+    console.error("Lỗi khi gọi API /api/config:", message);
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
 
 export async function PATCH(request: Request) {
   try {
-    // ── Lớp bảo vệ 2 (middleware là lớp 1) ────────────────────────────
-    // Không tin tưởng mỗi middleware: nếu matcher bị sửa nhầm thì route
-    // vẫn tự chặn được. API này bypass RLS nên phải chắc chắn.
     const session = await getServerSession(authOptions);
     if (!session?.user) {
       return NextResponse.json({ error: "Chưa đăng nhập" }, { status: 401 });
     }
-    if (!isAdmin((session.user as { id?: string }).id)) {
+    const user = session.user as { id?: string };
+    if (!isAdmin(user.id)) {
       return NextResponse.json(
         { error: "Không có quyền sửa dữ liệu bot" },
         { status: 403 }
       );
     }
-    // ──────────────────────────────────────────────────────────────────
-    const body = await request.json();
-    const { is_onboard_enabled, ...otherUpdates } = body;
 
-    const updateData: any = {};
-    if (is_onboard_enabled !== undefined) {
-      updateData.is_onboard_enabled = is_onboard_enabled;
+    const body: unknown = await request.json();
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return NextResponse.json({ error: 'Nội dung cập nhật không hợp lệ.' }, { status: 400 });
     }
-    
-    for (const key of Object.keys(otherUpdates)) {
-        updateData[key] = otherUpdates[key];
+
+    const updates: Record<string, boolean | string> = {};
+    for (const field of WRITABLE_FIELDS) {
+      if (!(field in body)) continue;
+      const value = Reflect.get(body, field);
+      if (field === 'is_onboard_enabled') {
+        if (typeof value !== 'boolean') {
+          return NextResponse.json({ error: 'Trường cấu hình không hợp lệ.' }, { status: 400 });
+        }
+        updates[field] = value;
+      } else {
+        if (typeof value !== 'string') {
+          return NextResponse.json({ error: 'Trường cấu hình không hợp lệ.' }, { status: 400 });
+        }
+        updates[field] = value;
+      }
+    }
+    if (Object.keys(updates).length === 0) {
+      return NextResponse.json({ error: 'Không có trường cấu hình hợp lệ.' }, { status: 400 });
     }
 
     const { data, error } = await supabase
       .from('guild_config')
-      .update(updateData)
+      .update(updates)
       .eq('guild_id', GUILD_ID)
       .select()
       .single();
 
-    if (error) throw error;
-
-    // Trigger webhook để cả 2 bot discord load lại config
-    for (const url of [process.env.BOT_WEBHOOK_URL, process.env.CHATBOT_WEBHOOK_URL]) {
-      if (url) {
-        try {
-          fetch(url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-          }).catch(e => console.error("Không thể trigger webhook:", e));
-        } catch (e) {
-          console.error("Lỗi khi gửi webhook:", e);
-        }
-      }
+    if (error) {
+      return NextResponse.json({ error: 'Không thể lưu cấu hình guild.' }, { status: 500 });
     }
 
-    return NextResponse.json(data);
-  } catch (error: any) {
-    console.error("Lỗi cập nhật config:", error.message);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    const reload = await reloadBots();
+    if (!reload.ok) {
+      return NextResponse.json(
+        { ...data, saved: true, applied: false, error: reload.error },
+        { status: 502 }
+      );
+    }
+    return NextResponse.json({ ...data, saved: true, applied: true });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Lỗi không xác định';
+    console.error("Lỗi cập nhật config:", message);
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

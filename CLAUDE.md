@@ -80,14 +80,14 @@ Sau khi đã "chốt", áp dụng 4 nguyên tắc này khi code:
 ## Lưu trữ dữ liệu — QUY TẮC BẮT BUỘC (Supabase)
 
 Dữ liệu vận hành thật của bot (dữ liệu người dùng, cấu hình guild, template, điểm số...) hiện được lưu trên
-**Supabase** — bảng `json_storage`, khóa theo tên file, qua lớp `load_json()` / `save_json()` trong
-`bot/core/storage.py`. Thư mục `bot/Storage/` là **legacy** từ thời lưu file JSON local (cơ chế sync
-GitHub `GITHUB_SYNCED_FILES` đã bị bỏ, `sync_to_github()`/`restore_from_github()` chỉ là stub) — không
-còn là nơi lưu dữ liệu vận hành thật.
+**Supabase** — JSON blobs ở bảng `json_storage`, khóa theo tên file, qua `bot/core/storage.py`;
+runtime dùng `load_json_async()` / `save_json_async()` (sync helpers dành cho scripts).
+Thư mục `bot/Storage/` là **legacy**, không còn GitHub sync hoặc startup restore stub,
+không còn là nơi lưu dữ liệu vận hành thật.
 
 ### ⛔ TUYỆT ĐỐI KHÔNG được phép:
 
-- Đọc/ghi dữ liệu vận hành bằng `open()` thuần hay gọi thẳng Supabase — phải dùng `load_json()` / `save_json()` từ `bot/core/storage.py`.
+- Đọc/ghi JSON vận hành bằng `open()` thuần hoặc query trực tiếp Supabase để bypass `bot/core/storage.py`.
 - Sửa/xóa dữ liệu trực tiếp trên bảng `json_storage` qua console Supabase để "test nhanh" — mọi thay đổi phải qua code.
 - Đặt file tạm, file test, file log vào `bot/Storage/` — thư mục này không còn được sync nên dữ liệu đặt vào sẽ thất lạc.
 
@@ -99,10 +99,10 @@ Script dùng `DATABASE_URL` từ `.env` (đã có sẵn, chứa mật khẩu DB)
 - Mọi thay đổi schema (tên bảng, cột, kiểu) vẫn phải mô tả vào file docs của tính năng theo quy tắc trên.
 - KHÔNG dùng anon/service_role key qua REST để tạo cột (REST không hỗ trợ DDL) — luôn qua script này hoặc SQL Editor.
 
-1. Mọi đọc/ghi dữ liệu phải qua `load_json()` / `save_json()` — không dùng `open()` thuần.
+1. Đọc/ghi JSON vận hành qua `storage.py`; async runtime không gọi sync I/O — không dùng `open()` thuần.
 2. Nếu cần thêm **bảng mới trên Supabase**: mô tả schema bảng (tên bảng, cột, kiểu, khóa chính) vào file docs của tính năng, và KHÔNG đụng bảng `json_storage` ngoài qua `storage.py`.
 3. Tên khóa/tên file vẫn theo pattern `tnc_<tính_năng>_v<số_version>` để dễ tra cứu trên Supabase.
-4. Mọi thao tác DB phải kiểm tra `SUPABASE_URL` / `SUPABASE_ANON_KEY` tồn tại và bọc trong `try-except` (xem mẫu ở `bot/core/database.py`) để không crash trên CI.
+4. Lớp DB kiểm tra cấu hình key backend và truyền lỗi rõ (xem `bot/core/db.py`); tests chặn dotenv/network trước import, không biến DB lỗi thành kho rỗng.
 5. Đọc file chi tiết [bot/Storage/README.md](bot/Storage/README.md) trước khi thay đổi dữ liệu.
 
 ## Skills & Agents có sẵn trong dự án

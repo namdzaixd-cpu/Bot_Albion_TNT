@@ -25,7 +25,7 @@ web_dashboard/        Dashboard web Next.js (Discord OAuth2)
 |---|---|---|
 | **About** | `/aboutme` | Giới thiệu bot + link trang web (embed ngắn gọn) |
 | **Onboarding** | `/recuibot setup_channels`, `/recuibot set_apply_channel`, `/recuibot setup_roles`, `/recuibot toggle`, `/recuibot list` | Hệ thống Bot Thư Ký tiếp đón thành viên mới, duyệt đơn qua Forum, `/recuibot list` xem cấu hình & đơn chờ |
-| **Siphoned Points** | `/spupdate`, `/spcheck`, `!addsp`, `!removesp`, `!removesprole`, `!resetsp` | Parse file log `.txt` để cộng dồn điểm siphoned theo người chơi, bảng xếp hạng phân trang |
+| **Siphoned Points** | `/spupdate`, `/spcheck`, `/sphistory`, `/sptop`, `/splog`, `/spexport`, `/addsp`, `/removesp`, `/removesprole`, `/resetsp` | Import log `.txt` atomic, cộng dồn điểm, lịch sử và xếp hạng theo khoảng thời gian |
 | **Massing** | `/massing`, `/masstemplatelist`, `/masstemplatedelete` | Tạo party PVP/PVE theo role/weapon, UI nút bấm (join/kick/move/fill), lưu template, tự khôi phục sau restart |
 | **GuildCheck** | `/guildconfig`, `/guildcheck`, `/guildmembers`, `/guildaudit`, `/newmembers [days]` | Cấu hình guild, tra cứu thành viên in-game, hiển thị bảng phân trang thành viên guild & fame, đối soát nhân sự In-game vs Discord, `/newmembers` lọc thành viên mới vào guild qua Discord API (0đ) |
 | **Alo (TTS)** | `/alojoin`, `/aloleave`, `/alonametoggle`, `/alo`, `/aloconfig`, `/alomute`, `/alounmute` | Đọc tin nhắn text thành giọng nói (gTTS) vào voice channel, tự rejoin khi rớt mạng |
@@ -45,39 +45,55 @@ Tính năng AI Chat đã được tách sang repo **[TNC-Chatbot](https://github
 
 ## Lưu trữ dữ liệu
 
-Toàn bộ state lưu dưới dạng file JSON phẳng trong `bot/`. Mỗi lần ghi:
+Dữ liệu vận hành lưu trên Supabase: party/templates/GuildCheck/heartbeat ở `json_storage`,
+SP/CoreBank/LastSeen/config ở các bảng chuyên biệt. `bot/Storage/` là legacy, không GitHub sync.
 
-1. Ghi ra file `.tmp`, backup file cũ thành `.bak`, rồi `os.replace` — chống hỏng dữ liệu khi crash giữa chừng.
-2. Tự động `git commit` + `git push` dữ liệu lên GitHub (do Replit không có disk bền vững) — xem `sync_to_github()` trong `bot/main.py`.
+- Runtime dùng async DB/storage boundary; DB lỗi không bị hiểu là state rỗng.
+- SP economy/history/watermark commit atomic; Core payment ledger giữ kết quả chưa rõ để đối soát,
+  không tự retry API ngoài khi có khả năng đã cộng/trừ tiền.
+- Chi tiết schema, migration và rollout: [DATABASE_ARCHITECTURE.md](DATABASE_ARCHITECTURE.md).
 
-## Chạy bot
+## Triển khai bot
 
 ```bash
 pip install -r requirements.txt
-# hoặc: uv sync (dùng pyproject.toml / uv.lock)
-
-cp bot/.env.example bot/.env   # rồi điền giá trị thật
-python bot/main.py
+# Cấu hình environment trên Render theo .env.example; không ghi đè .env đang có.
+# Apply schema/migrations tới DB được chọn có chủ đích trước deploy code phụ thuộc RPC.
+python scripts/apply_schema.py
 ```
 
-Biến môi trường cần thiết (xem [bot/.env.example](bot/.env.example)):
+Entry point production: `bot/main.py`. **Không chạy thêm bot thật trên local** khi production đang
+hoạt động, tránh trùng Discord gateway. Dev chỉ chạy tests/smoke cô lập, không dùng dữ liệu thật.
+
+Biến môi trường backend (xem [.env.example](.env.example)):
 
 | Biến | Mô tả |
 |---|---|
 | `DISCORD_TOKEN` | Token bot Discord |
 | `DISCORD_GUILD_ID` | ID server Discord |
-| `GITHUB_GIT_URL` | URL GitHub kèm Personal Access Token, dùng để auto-sync dữ liệu |
-| `OPENROUTER_API_KEY` | API key OpenRouter, dùng cho tính năng chat AI (cog `chat_ai`) |
-| `GEMINI_API_KEY` | API key Google AI Studio, dùng cho các bước Gemini trong chuỗi dự phòng AI |
-| `OLLAMA_API_KEY` | API key Ollama Cloud (`ollama.com`), dùng cho các bước Ollama trong chuỗi dự phòng AI (tùy chọn, một số endpoint không bắt buộc) |
+| `SUPABASE_URL` | Supabase project URL |
+| `SUPABASE_SERVICE_ROLE_KEY` | Key backend; không đưa ra browser |
+| `WEBHOOK_SECRET` | Secret server-side giống dashboard để xác thực reload |
+| `DATABASE_URL` / `DIRECT_URL` | Kết nối PostgreSQL cho migration; không log password |
+| `GEMINI_API_KEY` | API key cho Update Translator; AI chatbot nằm ở repo riêng |
 
 Bot expose Flask server tại `http://localhost:5000` (Online: [bot-albion-tnc.onrender.com](https://bot-albion-tnc.onrender.com/)):
-- `GET /` — Trang giới thiệu & trạng thái bot (HTML)
-- `GET /health` — health check
+- `GET /` — Trang giới thiệu; HTTP service sống không chứng minh Discord gateway ready
+- `POST /api/webhook/reload` — Yêu cầu `Authorization: Bearer <WEBHOOK_SECRET>`
+
+Dashboard `/api/bot-status` trả `main_bot` và `chatbot`, lấy heartbeat readiness/freshness từ DB.
 
 ## Lưu ý bảo mật
 
-- **Không bao giờ commit file `.env`** — chứa `DISCORD_TOKEN` và `GITHUB_GIT_URL` (URL này nhúng
-  sẵn PAT của GitHub).
-- `GITHUB_GIT_URL` được truyền trực tiếp vào `subprocess.run(["git", "push", GIT_URL, "main"])` —
-  cẩn thận khi log lỗi vì URL có thể lộ token ra console/log.
+- Không commit `.env`, DB credential, Discord token hoặc bank token. Dashboard trả
+  `token_configured`, không trả raw bank token; admin đổi token qua PATCH server-side.
+- Thiếu/sai webhook secret không dispatch reload. Persist thành công nhưng reload lỗi được báo
+  rõ là chưa áp dụng, không báo success giả.
+- Credential từng hard-code cần rotate qua quyền quản trị provider nếu còn hiệu lực;
+  xóa literal trong source không thu hồi credential đã lộ.
+
+## Toàn vẹn dữ liệu và đối soát
+
+- [Ledger CoreBank, SP transaction, runtime/reload và rollout](docs/features/data_integrity_and_runtime.md).
+- [Ma trận sửa F01–F36 và trạng thái vận hành](docs/tasks/2026-10-04_full_project_fixes/02_task.md).
+- [Bằng chứng kiểm chứng cô lập và giới hạn production](docs/tasks/2026-10-04_full_project_fixes/03_walkthrough.md).

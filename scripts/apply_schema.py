@@ -1,45 +1,83 @@
-"""Apply schema_v2.sql lên Supabase thật qua Management API. Chạy từng statement."""
-import json, urllib.request, os, re, sys
+"""Apply the repository schema and approved migrations in one transaction."""
 
-TOK = os.getenv("SUPABASE_ACCESS_TOKEN", "")
-REF = "jbfqniokcluggcolwgut"
-URL = f"https://api.supabase.com/v1/projects/{REF}/database/query"
+import os
+from pathlib import Path
+from typing import Callable
 
-sql = open("scripts/schema_v2.sql", encoding="utf-8").read()
-# Tách statement theo ; nhưng bỏ qua ; trong string/comment đơn giản
-statements = [s.strip() for s in sql.split(";") if s.strip() and not s.strip().startswith("--")]
 
-def run(stmt):
-    # bỏ comment dòng
-    lines = [l for l in stmt.splitlines() if not l.strip().startswith("--")]
-    q = "\n".join(lines).strip()
-    if not q:
-        return None
-    body = json.dumps({"query": q}).encode()
-    req = urllib.request.Request(URL, data=body, method="POST")
-    req.add_header("Authorization", f"Bearer {TOK}")
-    req.add_header("Content-Type", "application/json")
+SCRIPT_DIR = Path(__file__).resolve().parent
+
+class MissingDatabaseDriverError(RuntimeError):
+    """The PostgreSQL client library is not installed."""
+
+
+def _load_driver():
     try:
-        with urllib.request.urlopen(req, timeout=30) as r:
-            return r.read().decode()
-    except urllib.error.HTTPError as e:
-        return f"HTTPERR {e.code}: {e.read().decode()[:300]}"
-    except Exception as e:
-        return f"ERR {e}"
+        import psycopg
+    except ImportError as exc:
+        raise MissingDatabaseDriverError(
+            "The psycopg package is required to apply the schema."
+        ) from exc
+    return psycopg.connect
 
-ok, fail = 0, 0
-for i, st in enumerate(statements, 1):
-    # rút gọn preview
-    prev = st[:60].replace("\n", " ")
-    res = run(st)
-    if res is None:
-        continue
-    if res.startswith("HTTPERR") or res.startswith("ERR"):
-        print(f"[FAIL {i}] {prev}... -> {res}")
-        fail += 1
-    else:
-        ok += 1
-        if i % 5 == 0:
-            print(f"[ok {i}] {prev}...")
-print(f"\n=== DONE: {ok} ok, {fail} fail ===")
-sys.exit(1 if fail else 0)
+
+def migration_files(scripts_dir: Path = SCRIPT_DIR) -> list[Path]:
+    schema = scripts_dir / "schema.sql"
+    migrations_dir = scripts_dir / "migrations"
+    hardening = scripts_dir / "migration_security.sql"
+
+    required = (schema, hardening)
+    missing = [path.name for path in required if not path.is_file()]
+    if missing:
+        raise FileNotFoundError(
+            "Required schema input is missing: " + ", ".join(missing)
+        )
+    if not migrations_dir.is_dir():
+        raise FileNotFoundError("Required schema input is missing: migrations/")
+
+    migrations = sorted(migrations_dir.glob("*.sql"), key=lambda path: path.name)
+    return [schema, *migrations, hardening]
+
+
+def apply_migrations(
+    database_url: str,
+    *,
+    scripts_dir: Path = SCRIPT_DIR,
+    connect: Callable | None = None,
+) -> list[str]:
+    files = migration_files(scripts_dir)
+    if connect is None:
+        connect = _load_driver()
+
+    applied = []
+    with connect(database_url) as connection:
+        with connection.cursor() as cursor:
+            for path in files:
+                cursor.execute(path.read_text(encoding="utf-8"))
+                applied.append(path.name)
+    return applied
+
+
+def main() -> int:
+    database_url = os.getenv("DIRECT_URL") or os.getenv("DATABASE_URL")
+    if not database_url:
+        print("Error: set DIRECT_URL or DATABASE_URL in the process environment.")
+        return 1
+
+    try:
+        applied = apply_migrations(database_url)
+    except MissingDatabaseDriverError as exc:
+        print(str(exc))
+        return 1
+    except Exception as exc:
+        print(f"Schema application failed ({type(exc).__name__}); the transaction was rolled back.")
+        return 1
+
+    for filename in applied:
+        print(f"Applied {filename}")
+    print("Schema applied successfully.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

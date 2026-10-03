@@ -1,69 +1,27 @@
-﻿# 📦 bot/Storage — Kho Dữ Liệu Bot TNC
+# Storage keys và dữ liệu legacy
 
-Thư mục này chứa **toàn bộ dữ liệu vận hành thật** của Bot Albion TNC.
-Mọi thay đổi trong thư mục này đều được **tự động đồng bộ lên GitHub** qua cơ chế `GITHUB_SYNCED_FILES` trong `bot/core/storage.py`.
+Dữ liệu JSON vận hành hiện nằm trên **Supabase `json_storage`**, khóa `file_name = basename(path)`. `bot/Storage/` là thư mục legacy, không phải nơi bot ghi state thật và không còn tự GitHub sync/backup `.bak`.
 
----
+## Quy tắc bảo vệ
 
-## ⛔ NGHIÊM CẤM (dành cho AI Agent & Developer)
+- Không sửa/xóa các snapshot legacy có sẵn để test; không đặt test, log hoặc file tạm tại thư mục này.
+- Dữ liệu JSON vận hành phải đọc/ghi qua `bot/core/storage.py`, không `open()` thuần hoặc gọi trực tiếp Supabase để bypass storage contract.
+- Runtime async dùng `load_json_async(path, default)` / `save_json_async(data, path)`. Sync `load_json` / `save_json` chỉ dùng trong script sync thực ngoài event loop.
+- Default chỉ khi row không tồn tại. Request lỗi phải được xử lý như lỗi; không dùng empty default làm snapshot authoritative rồi ghi đè kho.
+- Persist thất bại raise lỗi; không báo đã lưu. Async write copy payload trước offload để các edits concurrent không đổi dữ liệu đang ghi.
+- Snapshot legacy import cần nguồn offline explicit và chạy có chủ đích; không tự import thư mục này lúc startup/test hoặc overwrite DB từ snapshot cũ.
 
-> **Dữ liệu ở đây là thật. Mất là mất vĩnh viễn, không thể khôi phục.**
+## Khóa JSON runtime
 
-- **KHÔNG** xóa, ghi đè hay sửa thẳng file JSON ở đây — kể cả khi đang debug hoặc test.
-- **KHÔNG** dùng `open()` thuần để đọc/ghi — phải dùng `load_json()` / `save_json()` từ `bot/core/storage.py` (có cơ chế backup `.bak` + atomic write).
-- **KHÔNG** đặt file tạm, file test, file log vào đây — chúng sẽ bị đẩy lên GitHub và làm ô nhiễm data repo.
+| Khóa | Cog/consumer |
+|---|---|
+| `tnc_massing_v1.json` | Active parties và restore views Massing. |
+| `tnc_templates_v1.json` | Templates Massing. |
+| `tnc_guildcheck_v1.json` | Cấu hình GuildCheck. |
+| `tnc_bot_status.json` | Heartbeat main bot. |
 
----
+Các key khác theo constant trong cog sở hữu; tên mới theo `tnc_<tính_năng>_v<version>.json`. Đường dẫn `STORAGE_DIR` chỉ tạo basename key, không tạo file runtime local. Không thêm vào `GITHUB_SYNCED_FILES` vì cơ chế đó đã bỏ.
 
-## ✅ Quy tắc khi thêm file dữ liệu mới
+SP, CoreBank ledger/config, LastSeen, TTS config và danh mục Discord dùng các bảng chuyên biệt qua lớp DB; không cập nhật snapshot JSON legacy để thay dữ liệu bảng.
 
-1. **Đặt file vào thư mục này** với tên theo pattern:
-   ```
-   tnc_<tính_năng>_v<số_version>.json
-   ```
-   Ví dụ đúng: `tnc_massing_v1.json`, `tnc_register_v1.json`
-   Ví dụ sai: `data.json`, `config_temp.json`, `test_xyz.json`
-
-2. **Import `STORAGE_DIR`** từ `bot/core/config.py` trong cog tương ứng:
-   ```python
-   from core.config import STORAGE_DIR
-   MY_FILE = os.path.join(STORAGE_DIR, "tnc_myfeature_v1.json")
-   ```
-
-3. **Thêm đường dẫn** vào `GITHUB_SYNCED_FILES` trong `bot/core/storage.py`:
-   ```python
-   "bot/Storage/tnc_myfeature_v1.json",
-   ```
-
-4. **Bump version** (`_v1` → `_v2`) khi cấu trúc JSON thay đổi không tương thích ngược, để tránh bot crash khi đọc data cũ.
-
----
-
-## 📋 Danh sách file hiện có
-
-| File | Mô tả | Cog sở hữu | Sync GitHub |
-|------|--------|------------|-------------|
-| `tnc_massing_v1.json` | Dữ liệu các party Massing đang active | `cogs/massing.py` | ✅ |
-| `tnc_templates_v1.json` | Template Massing do Officer lưu (ZvZ, PVP...) | `cogs/massing.py` | ✅ |
-| `tnc_sp_v32.json` | Lịch sử điểm Siphoned của thành viên | `cogs/siphoned.py` | ✅ |
-| `tnc_lastseen_v1.json` | Thời điểm online cuối cùng của thành viên | `cogs/lastseen.py` | ✅ |
-| `tnc_register_v1.json` | Đăng ký IGN ↔ Discord ID | `cogs/guildcheck.py` | ✅ |
-| `tnc_guildcheck_v1.json` | Cấu hình GuildCheck (role, channel, guild Albion) | `cogs/guildcheck.py` | ✅ |
-| `tnc_unresolved_v1.json` | Thành viên chưa xác minh IGN | `cogs/guildcheck.py` | ✅ |
-| `tnc_coreconfig_v1.json` | Cấu hình Core-Bank (channel, token UB) | `cogs/corebank.py` | ✅ |
-| `tnc_core_credited_v1.json` | Lịch sử cấp Core cho thành viên | `cogs/corebank.py` | ✅ |
-| `tnc_tts_config_v1.json` | Cấu hình ALO TTS (channel, ngôn ngữ) | `cogs/alo_tts.py` | ✅ |
-| `tnc_ai_config.json` | Cấu hình AI Chat (model, channel, whitelist) | `cogs/chat_ai.py` | ✅ |
-
-> File `.bak` (vd: `tnc_lastseen_v1.json.bak`) là bản backup tự động — **đừng xóa**, bot dùng để khôi phục nếu file chính bị lỗi.
-
----
-
-## 🔧 Cơ chế bảo vệ dữ liệu
-
-Bot dùng cơ chế **atomic write** để đảm bảo không mất dữ liệu khi bot crash giữa chừng:
-1. Ghi data ra file `.tmp`
-2. Copy file hiện tại thành `.bak`
-3. Rename `.tmp` → file chính (atomic `os.replace`)
-
-Toàn bộ logic này nằm trong `bot/core/storage.py`.
+Xem `DATABASE_ARCHITECTURE.md` cho schema, transaction, error semantics, test isolation và rollout.

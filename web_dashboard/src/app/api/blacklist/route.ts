@@ -1,7 +1,20 @@
 import { NextResponse } from "next/server";
+import type { Session } from "next-auth";
 import { supabase } from "@/lib/supabaseServer";
 import { getServerSession } from "next-auth/next";
 import { authOptions, isAdmin } from "@/lib/auth";
+import { GUILD_ID } from "@/lib/guild";
+
+function authorizeAdmin(session: Session | null) {
+  if (!session?.user) {
+    return { error: NextResponse.json({ error: "Chưa đăng nhập" }, { status: 401 }) };
+  }
+  const user = session.user as { id?: string };
+  if (!user.id || !isAdmin(user.id)) {
+    return { error: NextResponse.json({ error: "Không có quyền sửa dữ liệu bot" }, { status: 403 }) };
+  }
+  return { actorId: user.id };
+}
 
 export async function GET() {
   try {
@@ -11,83 +24,81 @@ export async function GET() {
       .order("timestamp", { ascending: false });
 
     if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      return NextResponse.json({ error: "Không thể tải blacklist." }, { status: 500 });
     }
-
     return NextResponse.json(data || []);
-  } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+  } catch {
+    return NextResponse.json({ error: "Không thể tải blacklist." }, { status: 500 });
   }
 }
 
-export async function POST(req: Request) {
+export async function POST(request: Request) {
   try {
-    // ── Lớp bảo vệ 2 (middleware là lớp 1) ────────────────────────────
-    // Không tin tưởng mỗi middleware: nếu matcher bị sửa nhầm thì route
-    // vẫn tự chặn được. API này bypass RLS nên phải chắc chắn.
-    const session = await getServerSession(authOptions);
-    if (!session?.user) {
-      return NextResponse.json({ error: "Chưa đăng nhập" }, { status: 401 });
+    const authorization = authorizeAdmin(await getServerSession(authOptions));
+    if ('error' in authorization) return authorization.error;
+
+    const body: unknown = await request.json();
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return NextResponse.json({ error: 'Nội dung blacklist không hợp lệ.' }, { status: 400 });
     }
-    if (!isAdmin((session.user as { id?: string }).id)) {
-      return NextResponse.json(
-        { error: "Không có quyền sửa dữ liệu bot" },
-        { status: 403 }
-      );
+    const discordId = Reflect.get(body, 'discord_id');
+    const ingameName = Reflect.get(body, 'ingame_name');
+    const reason = Reflect.get(body, 'reason');
+    if (
+      typeof discordId !== 'string' || !discordId ||
+      typeof ingameName !== 'string' || !ingameName ||
+      typeof reason !== 'string' || !reason
+    ) {
+      return NextResponse.json({ error: 'Thiếu thông tin blacklist hợp lệ.' }, { status: 400 });
     }
-    // ──────────────────────────────────────────────────────────────────
-    const body = await req.json();
+    const suppliedIngameId = Reflect.get(body, 'ingame_id');
+    if (suppliedIngameId !== undefined && typeof suppliedIngameId !== 'string') {
+      return NextResponse.json({ error: 'Ingame ID không hợp lệ.' }, { status: 400 });
+    }
 
     const { data, error } = await supabase
       .from("blacklist")
-      .upsert(body)
+      .upsert({
+        discord_id: discordId,
+        ingame_name: ingameName,
+        ingame_id: suppliedIngameId ?? "N/A (Added via Web)",
+        reason,
+        added_by_discord_id: authorization.actorId,
+        source_guild_id: GUILD_ID,
+      })
       .select()
       .single();
 
     if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      return NextResponse.json({ error: "Không thể lưu blacklist." }, { status: 500 });
     }
-
     return NextResponse.json(data);
-  } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+  } catch {
+    return NextResponse.json({ error: "Không thể xử lý blacklist." }, { status: 500 });
   }
 }
 
-export async function DELETE(req: Request) {
+export async function DELETE(request: Request) {
   try {
-    // ── Lớp bảo vệ 2 (middleware là lớp 1) ────────────────────────────
-    // Không tin tưởng mỗi middleware: nếu matcher bị sửa nhầm thì route
-    // vẫn tự chặn được. API này bypass RLS nên phải chắc chắn.
-    const session = await getServerSession(authOptions);
-    if (!session?.user) {
-      return NextResponse.json({ error: "Chưa đăng nhập" }, { status: 401 });
-    }
-    if (!isAdmin((session.user as { id?: string }).id)) {
-      return NextResponse.json(
-        { error: "Không có quyền sửa dữ liệu bot" },
-        { status: 403 }
-      );
-    }
-    // ──────────────────────────────────────────────────────────────────
-    const url = new URL(req.url);
-    const discord_id = url.searchParams.get("discord_id");
+    const authorization = authorizeAdmin(await getServerSession(authOptions));
+    if ('error' in authorization) return authorization.error;
 
-    if (!discord_id) {
+    const url = new URL(request.url);
+    const discordId = url.searchParams.get("discord_id");
+    if (!discordId) {
       return NextResponse.json({ error: "Thiếu discord_id" }, { status: 400 });
     }
 
     const { error } = await supabase
       .from("blacklist")
       .delete()
-      .eq("discord_id", discord_id);
+      .eq("discord_id", discordId);
 
     if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      return NextResponse.json({ error: "Không thể xóa khỏi blacklist." }, { status: 500 });
     }
-
     return NextResponse.json({ success: true });
-  } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+  } catch {
+    return NextResponse.json({ error: "Không thể xử lý blacklist." }, { status: 500 });
   }
 }

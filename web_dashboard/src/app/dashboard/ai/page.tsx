@@ -1,13 +1,13 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { Bot, Save, MessageSquare, Zap, Book, Eye } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Bot, MessageSquare, Zap, Book, Eye } from "lucide-react";
 import { toast } from "react-hot-toast";
 import MultiSearchableSelect, { Option } from "@/components/MultiSearchableSelect";
 
 export default function AIDashboard() {
   const [channels, setChannels] = useState<Option[]>([]);
-  
+
   const [config, setConfig] = useState({
     model: "inclusionai/ling-3.0-flash:free",
     intercept_channels: [] as string[],
@@ -15,16 +15,15 @@ export default function AIDashboard() {
     library_channel_ids: [] as string[],
     vision_channels: [] as string[]
   });
+  const saveQueue = useRef<Promise<void>>(Promise.resolve());
 
   useEffect(() => {
-    // Fetch Channels
     fetch('/api/discord-data')
       .then(res => res.json())
       .then(data => {
         if (data.channels) setChannels(data.channels);
       });
 
-    // Fetch AI Config
     fetch('/api/ai-config')
       .then(res => res.json())
       .then(data => {
@@ -40,27 +39,36 @@ export default function AIDashboard() {
       });
   }, []);
 
-  const autoSave = async (newConfig: any) => {
-    try {
-      const res = await fetch('/api/ai-config', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newConfig)
-      });
-      if (res.ok) {
+  const queueSave = (patch: Record<string, unknown>) => {
+    const save = async () => {
+      try {
+        const response = await fetch('/api/ai-config', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(patch)
+        });
+        const payload: unknown = await response.json().catch(() => null);
+        const result = payload && typeof payload === 'object' ? payload : {};
+        const applied = Reflect.get(result, 'applied') === true;
+        const error = Reflect.get(result, 'error');
+        if (!response.ok || !applied) {
+          toast.error(typeof error === 'string' ? error : "Lỗi lưu cấu hình AI!", { position: 'bottom-right' });
+          return;
+        }
         toast.success("Đã tự động lưu cấu hình AI!", { position: 'bottom-right' });
-      } else {
-        toast.error("Lỗi lưu cấu hình AI!", { position: 'bottom-right' });
+      } catch {
+        toast.error("Lỗi mạng!", { position: 'bottom-right' });
       }
-    } catch (err) {
-      toast.error("Lỗi mạng!", { position: 'bottom-right' });
-    }
+    };
+    saveQueue.current = saveQueue.current.then(save, save);
   };
 
-  const handleChange = (key: string, value: any) => {
-    const newConfig = { ...config, [key]: value };
-    setConfig(newConfig);
-    autoSave(newConfig);
+  const handleChange = (
+    key: 'intercept_channels' | 'autowiki_channels' | 'library_channel_ids' | 'vision_channels',
+    value: string[]
+  ) => {
+    setConfig(previous => ({ ...previous, [key]: value }));
+    queueSave({ [key]: value });
   };
 
   return (
@@ -85,8 +93,8 @@ export default function AIDashboard() {
           <input
             type="text"
             value={config.model}
-            onChange={(e) => setConfig({ ...config, model: e.target.value })}
-            onBlur={(e) => autoSave({ ...config, model: e.target.value })}
+            onChange={(event) => setConfig(previous => ({ ...previous, model: event.target.value }))}
+            onBlur={(event) => queueSave({ model: event.currentTarget.value })}
             className="w-full bg-background border border-border rounded-lg px-4 py-2 text-sm text-white focus:outline-none focus:border-purple-400 transition-colors"
           />
         </div>

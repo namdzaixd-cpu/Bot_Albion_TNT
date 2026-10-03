@@ -8,7 +8,6 @@ except ImportError:
     pass
 
 TOKEN = os.getenv("DISCORD_TOKEN", "")
-GIT_URL = os.getenv("GITHUB_GIT_URL", "")
 # Guild mặc định (fallback khi thiếu env). Đổi tại .env DISCORD_GUILD_ID.
 DEFAULT_GUILD_ID = "712258265769050164"
 GUILD_ID = int(os.getenv("DISCORD_GUILD_ID", DEFAULT_GUILD_ID))
@@ -26,10 +25,13 @@ SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
 # Khóa chính dùng để kết nối Supabase từ backend bot (service_role > anon).
 SUPABASE_KEY = SUPABASE_SERVICE_ROLE_KEY or SUPABASE_ANON_KEY
 
+# Khóa server-side chung với dashboard để xác thực webhook reload.
+WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "")
+
 # Thư mục bot/ — dùng cho file config/template và file tạm
 DATA_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# Thư mục bot/Storage/ — nơi chứa toàn bộ file dữ liệu JSON
+# Thư mục legacy; basename đường dẫn là khóa json_storage, không ghi file local.
 STORAGE_DIR = os.path.join(DATA_DIR, "Storage")
 
 BOT_SESSION_ID = random.randint(1000, 9999)

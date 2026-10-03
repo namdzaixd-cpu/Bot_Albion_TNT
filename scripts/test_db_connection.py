@@ -1,97 +1,70 @@
-import os
-import urllib.request
+"""Read-only Supabase REST diagnostic; live calls require --check-live."""
+
+import argparse
 import json
+import os
+import urllib.error
+import urllib.request
 
-def test_connection():
-    print("=== Supabase Connection Test (Zero Dependencies) ===")
-    
-    # Read .env manually
-    env_vars = {}
-    if os.path.exists(".env"):
-        print("✓ Found .env file.")
-        with open(".env", "r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line or line.startswith("#"):
-                    continue
-                if "=" in line:
-                    key, val = line.split("=", 1)
-                    # Strip quotes if present
-                    val = val.strip().strip('"').strip("'")
-                    env_vars[key.strip()] = val
-    else:
-        print("✗ .env file not found!")
-        return
 
-    supabase_url = env_vars.get("SUPABASE_URL")
-    supabase_anon_key = env_vars.get("SUPABASE_ANON_KEY")
-    supabase_service_key = env_vars.get("SUPABASE_SERVICE_ROLE_KEY")
+def required_credentials(url: str, key: str) -> tuple[str, str]:
+    if not url or not key:
+        raise ValueError("SUPABASE_URL and a Supabase key are required.")
+    return url.rstrip("/"), key
 
-    if not supabase_url:
-        print("✗ ERROR: SUPABASE_URL is missing in .env!")
-        return
 
-    print(f"SUPABASE_URL: {supabase_url}")
-    print(f"SUPABASE_ANON_KEY: {supabase_anon_key[:15]}... if configured")
-    if supabase_service_key:
-        print(f"SUPABASE_SERVICE_ROLE_KEY: {supabase_service_key[:15]}...")
-    else:
-        print("⚠ SUPABASE_SERVICE_ROLE_KEY is missing!")
+def _read_table(base_url: str, key: str, table: str, columns: str) -> int:
+    request = urllib.request.Request(f"{base_url}/rest/v1/{table}?select={columns}")
+    request.add_header("apikey", key)
+    request.add_header("Authorization", f"Bearer {key}")
+    with urllib.request.urlopen(request, timeout=5) as response:
+        data = json.loads(response.read().decode("utf-8"))
+    return len(data)
 
-    # 1. Test using ANON Key
-    if supabase_anon_key:
-        print("\n1. Testing HTTP connection with ANON KEY...")
-        url = f"{supabase_url}/rest/v1/sp_metadata?select=*"
-        req = urllib.request.Request(url)
-        req.add_header("apikey", supabase_anon_key)
-        req.add_header("Authorization", f"Bearer {supabase_anon_key}")
+
+def main(argv=None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--check-live",
+        action="store_true",
+        help="Explicitly run read-only REST queries with credentials from the process environment.",
+    )
+    args = parser.parse_args(argv)
+
+    if not args.check_live:
         try:
-            with urllib.request.urlopen(req, timeout=5) as response:
-                data = json.loads(response.read().decode())
-                print(f"✓ Success! HTTP query returned: {data}")
-        except Exception as e:
-            print(f"✗ Anon key request failed (likely RLS restricted, which is normal): {e}")
+            required_credentials("", "")
+        except ValueError:
+            print("Offline check passed: missing Supabase credentials are rejected before any request.")
+            return 0
+        raise AssertionError("Missing Supabase credentials should have been rejected")
 
-    # 2. Test using Service Role Key
-    if supabase_service_key:
-        print("\n2. Testing HTTP connection with SERVICE ROLE KEY...")
-        # Check sp_metadata
-        url_meta = f"{supabase_url}/rest/v1/sp_metadata?select=*"
-        req_meta = urllib.request.Request(url_meta)
-        req_meta.add_header("apikey", supabase_service_key)
-        req_meta.add_header("Authorization", f"Bearer {supabase_service_key}")
-        try:
-            with urllib.request.urlopen(req_meta, timeout=5) as response:
-                data = json.loads(response.read().decode())
-                print(f"✓ Success! sp_metadata: {data}")
-        except Exception as e:
-            print(f"✗ Service Role request failed: {e}")
-            return
-            
-        # Check user_activity count
-        url_act = f"{supabase_url}/rest/v1/user_activity?select=user_id"
-        req_act = urllib.request.Request(url_act)
-        req_act.add_header("apikey", supabase_service_key)
-        req_act.add_header("Authorization", f"Bearer {supabase_service_key}")
-        try:
-            with urllib.request.urlopen(req_act, timeout=5) as response:
-                data = json.loads(response.read().decode())
-                print(f"✓ Success! Table 'user_activity' has {len(data)} records.")
-        except Exception as e:
-            print(f"✗ Failed to query user_activity: {e}")
+    try:
+        base_url, key = required_credentials(
+            os.getenv("SUPABASE_URL", ""),
+            os.getenv("SUPABASE_SERVICE_ROLE_KEY", "") or os.getenv("SUPABASE_ANON_KEY", ""),
+        )
+    except ValueError as exc:
+        print(str(exc))
+        return 1
 
-        # Check user_economy count
-        url_eco = f"{supabase_url}/rest/v1/user_economy?select=user_id"
-        req_eco = urllib.request.Request(url_eco)
-        req_eco.add_header("apikey", supabase_service_key)
-        req_eco.add_header("Authorization", f"Bearer {supabase_service_key}")
-        try:
-            with urllib.request.urlopen(req_eco, timeout=5) as response:
-                data = json.loads(response.read().decode())
-                print(f"✓ Success! Table 'user_economy' has {len(data)} records.")
-                print("\n★ Database connection is fully verified and connected to Singapore via HTTP REST!")
-        except Exception as e:
-            print(f"✗ Failed to query user_economy: {e}")
+    try:
+        metadata_rows = _read_table(base_url, key, "sp_metadata", "id")
+        activity_rows = _read_table(base_url, key, "user_activity", "user_id")
+        economy_rows = _read_table(base_url, key, "user_economy", "user_id")
+    except urllib.error.HTTPError as exc:
+        print(f"Supabase REST request failed (HTTP {exc.code}).")
+        return 1
+    except Exception as exc:
+        print(f"Supabase REST request failed ({type(exc).__name__}).")
+        return 1
+
+    print(
+        "Read-only Supabase REST checks passed: "
+        f"sp_metadata={metadata_rows}, user_activity={activity_rows}, user_economy={economy_rows}."
+    )
+    return 0
+
 
 if __name__ == "__main__":
-    test_connection()
+    raise SystemExit(main())

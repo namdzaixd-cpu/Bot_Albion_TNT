@@ -18,10 +18,12 @@ Các script này đều sử dụng cấu hình chung của dự án. Đảm b�
 | Tên File | Công Dụng | Lệnh Chạy (Terminal) |
 | :--- | :--- | :--- |
 | **`test_api_full.py`** | **[Gộp 13 model]** Test nhanh kết nối/độ trễ thô của cả 3 nhà cung cấp cùng lúc (Không kèm prompt hệ thống). | `python3 test_api_key/test_api_full.py` |
-| **`test_api_full_with_instruction.py`** | **[Gộp 13 model]** Test phản hồi của cả 3 nhà cung cấp kèm **System Instruction thật** của bot (Tính cách Guild TNC). | `python3 test_api_key/test_api_full_with_instruction.py` |
+| **`test_api_full_with_instruction.py`** | **[Gộp 13 model]** Test phản hồi của cả 3 nhà cung cấp kèm system instruction từ file do bạn chỉ định. | `python3 test_api_key/test_api_full_with_instruction.py --instruction-path /path/to/chat_ai_instruction.txt` |
 | **`test_gemini.py`** | Test riêng lẻ Google Gemini API (gọi trực tiếp Google AI Studio). | `python3 test_api_key/test_gemini.py` |
 | **`test_ollama.py`** | Test riêng lẻ Ollama API (chạy cục bộ hoặc qua proxy). | `python3 test_api_key/test_ollama.py` |
 | **`test_openrouter.py`** | Test riêng lẻ OpenRouter API (không kèm prompt hệ thống). | `python3 test_api_key/test_openrouter.py` |
+
+Riêng helper này, truyền `--instruction-path` như ví dụ hoặc đặt biến môi trường tiến trình `AI_INSTRUCTION_PATH` trước khi chạy. File phải tồn tại và đọc được; helper dừng trước menu/API nếu thiếu hoặc sai đường dẫn. Không có instruction mặc định.
 
 ---
 

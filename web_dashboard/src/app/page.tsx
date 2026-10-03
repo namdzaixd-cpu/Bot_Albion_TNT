@@ -21,10 +21,11 @@ const FEATURES = [
     icon: "👋",
     details: "Cơ chế hoạt động chi tiết: Hệ thống cung cấp luồng phỏng vấn tự động.\n1. Thành viên mới nộp ảnh chỉ số Ingame. Bot lập tức gọi API Albion tính tổng Fame (PvE, PvP, Crafting) và quét Blacklist.\n2. Bot gửi mẫu hướng dẫn tự động yêu cầu người chơi đọc nội quy, và đổi tên Discord theo đúng chuẩn Form: '[TNC] Tên_Ingame Năm_Sinh'.\n3. Yêu cầu ứng viên nộp đơn (Apply) trực tiếp vào guild 'The Northern Constellations' trong game.\n4. Sau khi Officer xác nhận duyệt đơn ingame, thành viên ping Officer để được cấp Role chính thức trên Discord. Quy trình khép kín, an toàn tuyệt đối!",
     commands: [
-      { cmd: "/recuibot setup_channels", desc: "Tạo tự động các kênh cần thiết cho quá trình Onboarding." },
+      { cmd: "/recuibot setup_channels", desc: "Cấu hình ID kênh nội quy, guild-chat và hỏi đáp." },
       { cmd: "/recuibot set_apply_channel", desc: "Định cấu hình kênh nộp đơn." },
       { cmd: "/recuibot setup_roles", desc: "Cài đặt role sẽ nhận được khi được duyệt." },
-      { cmd: "/recuibot toggle", desc: "Bật/tắt tính năng nhận đơn ứng tuyển." }
+      { cmd: "/recuibot toggle", desc: "Bật/tắt tính năng nhận đơn ứng tuyển." },
+      { cmd: "/recuibot list", desc: "Xem cấu hình và đơn đang chờ duyệt." }
     ]
   },
   { 
@@ -33,12 +34,11 @@ const FEATURES = [
     icon: "🛡️",
     details: "Cơ chế hoạt động: Tính năng GuildCheck giúp rà soát toàn bộ server xem có ai đã out guild ingame mà vẫn còn role trên Discord hay không, hoặc những ai chưa liên kết IGN.",
     commands: [
-      { cmd: "/registertnc", desc: "Thành viên tự đăng ký IGN Albion của mình với hệ thống." },
-      { cmd: "/registerfor", desc: "Đăng ký IGN cho một thành viên khác." },
-      { cmd: "/myign", desc: "Kiểm tra thông tin IGN đã đăng ký." },
-      { cmd: "/guildcheck", desc: "Quét và đối chiếu danh sách thành viên Ingame với Discord." },
-      { cmd: "/unresolved", desc: "Liệt kê những thành viên Discord chưa có IGN hợp lệ." },
-      { cmd: "/guildconfig", desc: "Cài đặt tên Guild Ingame để đối chiếu." }
+      { cmd: "/guildconfig", desc: "Cấu hình Guild ID Albion và khu vực máy chủ." },
+      { cmd: "/guildcheck", desc: "Tra cứu một nhân vật có thuộc guild hay không." },
+      { cmd: "/guildmembers", desc: "Xem danh sách thành viên in-game và Fame." },
+      { cmd: "/guildaudit", desc: "Đối soát thành viên in-game với Discord (Officer)." },
+      { cmd: "/newmembers", desc: "Liệt kê thành viên mới vào Discord trong khoảng ngày đã chọn." }
     ]
   },
   { 
@@ -55,23 +55,19 @@ const FEATURES = [
     title: "🔮 Siphoned Energy", 
     desc: "Theo dõi thành viên hút siphoned từ guild, cập nhật bảng rank.", 
     icon: "💎",
-    details: "Cơ chế hoạt động: Bot theo dõi dòng chảy của Siphoned Energy (Năng lượng được hút) trong Guild. Khi thành viên nộp Siphoned, Officer có thể cộng/trừ điểm thủ công hoặc dùng tính năng tự động. Bot sẽ xếp hạng thành viên đóng góp nhiều nhất theo tuần.",
+    details: "Bot nhập log Siphoned để cộng dồn điểm, lưu lịch sử và cập nhật mốc thời gian trong cùng transaction. Upload lại phần log đã nhập không cộng lần hai. Officer có thể cộng/trừ điểm thủ công; các chỉnh sửa được tuần tự hóa với import.",
     commands: [
       { cmd: "/spupdate", desc: "Cập nhật và ghi log điểm Siphoned Energy." },
       { cmd: "/spcheck", desc: "Hiển thị bảng xếp hạng thành viên đóng góp nhiều nhất." },
-      { cmd: "!addsp", desc: "Cộng điểm Siphoned thủ công cho một thành viên." }
+      { cmd: "/addsp", desc: "Cộng điểm Siphoned thủ công cho thành viên (Officer)." }
     ]
   },
   { 
     title: "🚨 Global Blacklist", 
     desc: "Cơ sở dữ liệu danh sách đen liên minh, cảnh báo ngay khi nộp đơn.", 
     icon: "🚨",
-    details: "Cơ chế hoạt động: Danh sách đen tập trung (Global Blacklist) được chia sẻ giữa các Guild. Khi một ID Ingame hoặc Discord ID bị đưa vào sổ đen (scammer, gián điệp), hệ thống lập tức cập nhật vào cơ sở dữ liệu chung. Nếu kẻ đó nộp đơn vào bất kỳ guild nào xài chung bot, hệ thống sẽ chớp đỏ cảnh báo ngăn chặn ngay lập tức.",
-    commands: [
-      { cmd: "/blacklist add", desc: "Đưa một người vào danh sách đen kèm lý do." },
-      { cmd: "/blacklist remove", desc: "Xóa ai đó khỏi danh sách đen (Dành cho Admin)." },
-      { cmd: "/blacklist view", desc: "Kiểm tra danh sách đen hiện tại ngay trong Discord." }
-    ]
+    details: "Danh sách đen được quản lý qua dashboard và dùng để cảnh báo trong luồng Onboarding. Bản bot hiện đang nạp không đăng ký nhóm slash /blacklist; đăng nhập dashboard để tra cứu, admin quản lý các record.",
+    commands: []
   },
   { 
     title: "📦 Quản lý Core-Bank", 
@@ -81,7 +77,7 @@ const FEATURES = [
     commands: [
       { cmd: "/coresetup", desc: "Thiết lập kênh làm nơi nộp Core." },
       { cmd: "/coreadd", desc: "Đăng ký emoji để thả reaction xác nhận." },
-      { cmd: "/corelist", desc: "Xem bảng xếp hạng tích điểm Core." }
+      { cmd: "/corelist", desc: "Xem bảng giá emoji Core và cấu hình hiện tại." }
     ]
   },
   { 
@@ -105,24 +101,45 @@ export default function Home() {
   const [searchTerm, setSearchTerm] = useState("");
   const [activeTab, setActiveTab] = useState("home");
   const [selectedFeature, setSelectedFeature] = useState<any>(null);
-  const { data: session } = useSession();
+  const { data: session, status } = useSession();
 
   useEffect(() => {
+    let active = true;
+    if (status === "loading") {
+      setLoading(true);
+      return () => { active = false; };
+    }
+    if (status !== "authenticated") {
+      setEntries([]);
+      setError("Đăng nhập Discord để xem danh sách đen.");
+      setLoading(false);
+      return () => { active = false; };
+    }
+
+    setLoading(true);
+    setError("");
     const fetchBlacklist = async () => {
       try {
-        const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:5000";
-        const res = await fetch(`${apiUrl}/api/blacklist`);
-        if (!res.ok) throw new Error("Lỗi khi tải dữ liệu");
-        const data = await res.json();
-        setEntries(data);
-      } catch (err: any) {
-        setError(err.message || "Không thể kết nối đến Bot API.");
+        const response = await fetch('/api/blacklist', { cache: 'no-store' });
+        if (!response.ok) {
+          throw new Error(response.status === 401
+            ? "Phiên đăng nhập đã hết hạn. Hãy đăng nhập lại."
+            : "Không thể tải danh sách đen từ dashboard.");
+        }
+        const data: unknown = await response.json();
+        if (!Array.isArray(data)) throw new Error("Dữ liệu danh sách đen không hợp lệ.");
+        if (active) setEntries(data);
+      } catch (error: unknown) {
+        if (active) {
+          setError(error instanceof Error ? error.message : "Không thể tải danh sách đen.");
+        }
       } finally {
-        setLoading(false);
+        if (active) setLoading(false);
       }
     };
     fetchBlacklist();
-  }, []);
+    return () => { active = false; };
+  }, [status]);
 
   const filteredEntries = entries.filter((entry) =>
     entry.ingame_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -297,7 +314,12 @@ export default function Home() {
               <div className="glass-panel p-6 rounded-2xl border-red-900/50 text-center">
                 <p className="text-red-400 font-semibold mb-2">⚠️ Đã xảy ra lỗi</p>
                 <p className="text-text-muted">{error}</p>
-                <p className="text-sm mt-4 text-text-muted">Hãy chắc chắn Bot đang chạy và port 5000 đang mở.</p>
+                <p className="text-sm mt-4 text-text-muted">Dữ liệu được tải từ API cùng website sau khi đăng nhập.</p>
+                {(status !== "authenticated" || error.startsWith("Phiên đăng nhập")) && (
+                  <button onClick={() => signIn("discord")} className="mt-4 bg-[#5865F2] hover:bg-[#4752C4] text-white px-4 py-2 rounded-lg text-sm font-semibold transition-colors">
+                    Đăng nhập lại bằng Discord
+                  </button>
+                )}
               </div>
             ) : filteredEntries.length === 0 ? (
               <div className="glass-panel p-12 rounded-2xl text-center border-border">

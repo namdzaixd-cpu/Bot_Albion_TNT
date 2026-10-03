@@ -1,27 +1,70 @@
-"""Test nhanh db.py / config_store.py ở chế độ không có credential.
-Mục tiêu: đảm bảo hệ thống không crash khi Supabase thiếu, và helper trả giá trị đúng.
-Chạy: python scripts/test_db_layer.py
-"""
+"""Exercise the missing-credentials DB behavior without reading .env or using network."""
+
+import asyncio
 import os
 import sys
+from pathlib import Path
 
-# Giả lập thiếu env
-os.environ.pop("SUPABASE_URL", None)
-os.environ.pop("SUPABASE_SERVICE_ROLE_KEY", None)
-os.environ.pop("SUPABASE_ANON_KEY", None)
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+for name in (
+    "SUPABASE_URL",
+    "SUPABASE_SERVICE_ROLE_KEY",
+    "SUPABASE_ANON_KEY",
+    "DATABASE_URL",
+    "DIRECT_URL",
+):
+    os.environ[name] = ""
 
-from bot.core import db
-from bot.core import config_store
+try:
+    import dotenv
+
+    dotenv.load_dotenv = lambda *args, **kwargs: False
+except ImportError:
+    pass
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from bot.core import config_store, db
 from bot.core.config import DEFAULT_GUILD_ID
 
-print("1) get_client() thiếu env ->", db.get_client())
-print("2) safe_select thiếu client ->", db.safe_select("corebank_config", filters={"guild_id": "x"}))
-print("3) safe_upsert thiếu client ->", db.safe_upsert("corebank_config", {"guild_id": "x"}))
-print("4) get_config fallback default ->",
-      config_store.get_config("corebank_config", "999", default={"guild_id": "999", "auto_react": True}))
-print("5) save_config thiếu client ->",
-      config_store.save_config("corebank_config", {"guild_id": "999"}))
-print("6) DEFAULT_GUILD_ID ->", DEFAULT_GUILD_ID)
-print("ALL OK — không crash khi thiếu credential.")
+
+def main() -> int:
+    assert db.get_client() is None
+    assert db.safe_select("corebank_config", filters={"guild_id": "x"}) == (
+        None,
+        "client_unavailable",
+    )
+    assert db.safe_upsert("corebank_config", {"guild_id": "x"}) == "client_unavailable"
+
+    try:
+        config_store.get_config(
+            "corebank_config",
+            "999",
+            default={"guild_id": "999", "auto_react": True},
+        )
+    except db.DBError:
+        pass
+    else:
+        raise AssertionError("get_config must propagate missing-client read failure")
+
+    try:
+        config_store.save_config("corebank_config", {"guild_id": "999"})
+    except db.DBError:
+        pass
+    else:
+        raise AssertionError("save_config must propagate missing-client write failure")
+
+    async def check_async_boundary():
+        response, error = await db.async_execute(
+            lambda client: client.table("corebank_config").select("*")
+        )
+        assert response is None
+        assert error == "client_unavailable"
+
+    asyncio.run(check_async_boundary())
+    print(f"Missing-credential behavior verified; default guild configured: {bool(DEFAULT_GUILD_ID)}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

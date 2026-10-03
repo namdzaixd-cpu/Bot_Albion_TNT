@@ -1,31 +1,71 @@
-"""Test kết nối Supabase mô phỏng bot init (không chạy bot)."""
-import os, sys
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "bot"))
-from core.config import SUPABASE_URL, SUPABASE_KEY, TOKEN, GUILD_ID
-from core.db import get_client
+"""Check bot DB configuration offline, or query Supabase only with --check-live."""
 
-print("=== ENV CHECK ===")
-print(f"DISCORD_TOKEN(TOKEN): {'SET' if TOKEN else 'MISSING'}")
-print(f"SUPABASE_URL: {'SET' if SUPABASE_URL else 'MISSING'}")
-print(f"SUPABASE_KEY: {'SET' if SUPABASE_KEY else 'MISSING'} (len={len(SUPABASE_KEY)})")
-print(f"GUILD_ID: {GUILD_ID}")
+import argparse
+import os
+import sys
+from pathlib import Path
 
-print("\n=== CLIENT INIT ===")
-client = get_client()
-if client is None:
-    print("❌ Client None -> bot sẽ không query được DB")
-    sys.exit(1)
-print("✅ Client created OK")
 
-print("\n=== TEST QUERY guild_config ===")
-try:
-    res = client.table("guild_config").select("*").limit(1).execute()
-    if res.data:
-        print(f"✅ Query OK, rows={len(res.data)}, sample={res.data[0]}")
-    else:
-        print("⚠️ Query OK nhưng không có data")
-except Exception as e:
-    print(f"❌ Query failed: {e}")
-    sys.exit(1)
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "bot"))
 
-print("\n✅ BOT SẼ HOẠT ĐỘNG VỚI ENV NÀY (trên Render nếu set tương tự)")
+
+def _disable_dotenv() -> None:
+    try:
+        import dotenv
+
+        dotenv.load_dotenv = lambda *args, **kwargs: False
+    except ImportError:
+        pass
+
+
+def main(argv=None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--check-live",
+        action="store_true",
+        help="Explicitly make a read-only Supabase query using process environment variables.",
+    )
+    args = parser.parse_args(argv)
+
+    if not args.check_live:
+        for name in ("SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY", "SUPABASE_ANON_KEY"):
+            os.environ[name] = ""
+    _disable_dotenv()
+
+    from core import db
+    from core.config import GUILD_ID, SUPABASE_KEY, SUPABASE_URL, TOKEN
+
+    if not args.check_live:
+        if db.get_client() is not None:
+            raise AssertionError("DB must remain disabled without explicit live mode")
+        assert db.safe_select("guild_config", filters={"guild_id": str(GUILD_ID)}) == (
+            None,
+            "client_unavailable",
+        )
+        print("Offline check passed: the DB client is disabled without explicit credentials.")
+        return 0
+
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        print("Live check requires SUPABASE_URL and a Supabase key in the process environment.")
+        return 1
+
+    client = db.get_client()
+    if client is None:
+        print("Supabase client initialization failed.")
+        return 1
+    try:
+        result = client.table("guild_config").select("guild_id").limit(1).execute()
+    except Exception as exc:
+        print(f"Supabase read failed ({type(exc).__name__}).")
+        return 1
+
+    print(
+        "Supabase read succeeded; rows=%d; Discord token=%s."
+        % (len(result.data or []), "configured" if TOKEN else "missing")
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

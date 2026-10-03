@@ -1,104 +1,116 @@
-import os
-import json
-from dotenv import load_dotenv
-from supabase import create_client, Client
+"""Import structured records from an explicitly supplied offline legacy snapshot."""
 
-# Load environment variables from .env
-load_dotenv()
+import argparse
+from pathlib import Path
 
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASE_ANON_KEY")
+from _legacy_snapshot import (
+    create_supabase_client,
+    read_snapshot_json,
+    resolve_snapshot_dir,
+)
 
-if not SUPABASE_URL or not SUPABASE_KEY:
-    print("Error: SUPABASE_URL or SUPABASE_KEY is missing in .env")
-    exit(1)
 
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+SOURCE_FILES = (
+    "tnc_ai_config.json",
+    "tnc_lastseen_v1.json",
+    "tnc_sp_v32.json",
+    "tnc_tts_config_v1.json",
+)
+CHUNK_SIZE = 1000
 
-DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bot", "Storage")
 
-def load_json(filename):
-    filepath = os.path.join(DATA_DIR, filename)
-    if os.path.exists(filepath):
-        with open(filepath, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    return None
+def load_snapshot(snapshot_dir: Path) -> dict[str, object]:
+    snapshot = {}
+    for filename in SOURCE_FILES:
+        if (snapshot_dir / filename).exists():
+            snapshot[filename] = read_snapshot_json(snapshot_dir, filename)
+    if not snapshot:
+        raise FileNotFoundError("No supported JSON files were found in the selected offline snapshot.")
+    return snapshot
 
-print("Starting migration from JSON to Supabase...")
 
-# 1. Migrate AI Config (tnc_ai_config.json -> ai_config)
-ai_config = load_json("tnc_ai_config.json")
-if ai_config:
-    print("Migrating ai_config...")
-    guild_id = "default"  # Using 'default' since it was global before
+def _upsert_chunks(client, table: str, records: list[dict]) -> None:
+    for start in range(0, len(records), CHUNK_SIZE):
+        client.table(table).upsert(
+            records[start:start + CHUNK_SIZE],
+            ignore_duplicates=True,
+        ).execute()
+
+
+def import_snapshot(snapshot: dict[str, object], client) -> int:
+    imported = 0
+
+    ai_config = snapshot.get("tnc_ai_config.json")
+    if ai_config is not None:
+        client.table("ai_config").upsert(
+            {
+                "guild_id": "default",
+                "model": ai_config.get("model", "inclusionai/ling-3.0-flash:free"),
+                "available_models": ai_config.get("available_models", []),
+                "channel_buffers": ai_config.get("channel_buffers", {}),
+                "intercept_channels": ai_config.get("intercept_channels", []),
+                "autowiki_channels": ai_config.get("autowiki_channels", []),
+            },
+            on_conflict="guild_id",
+            ignore_duplicates=True,
+        ).execute()
+        imported += 1
+
+    lastseen = snapshot.get("tnc_lastseen_v1.json")
+    if lastseen is not None:
+        records = [
+            {"user_id": user_id, "last_seen": timestamp}
+            for user_id, timestamp in lastseen.items()
+        ]
+        _upsert_chunks(client, "user_activity", records)
+        imported += 1
+
+    sp_data = snapshot.get("tnc_sp_v32.json")
+    if sp_data is not None:
+        records = [
+            {"user_id": user_id, "silver_pieces": int(amount)}
+            for user_id, amount in sp_data.get("history", {}).items()
+        ]
+        _upsert_chunks(client, "user_economy", records)
+        imported += 1
+
+    tts_data = snapshot.get("tnc_tts_config_v1.json")
+    if tts_data is not None:
+        client.table("alo_tts_config").upsert(
+            {
+                "id": 1,
+                "read_name": tts_data.get("read_name", {}),
+                "rejoin": tts_data.get("rejoin", {}),
+                "afk": tts_data.get("afk", {}),
+            },
+            on_conflict="id",
+            ignore_duplicates=True,
+        ).execute()
+        imported += 1
+    return imported
+
+
+def main(argv=None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--legacy-snapshot-dir",
+        required=True,
+        help="Directory containing an offline export; bot/Storage is protected and rejected.",
+    )
+    args = parser.parse_args(argv)
+
     try:
-        supabase.table("ai_config").upsert({
-            "guild_id": guild_id,
-            "model": ai_config.get("model", "inclusionai/ling-3.0-flash:free"),
-            "available_models": ai_config.get("available_models", []),
-            "channel_buffers": ai_config.get("channel_buffers", {}),
-            "intercept_channels": ai_config.get("intercept_channels", []),
-            "autowiki_channels": ai_config.get("autowiki_channels", [])
-        }).execute()
-        print("ai_config migrated successfully.")
-    except Exception as e:
-        print(f"Error migrating ai_config: {e}")
+        snapshot_dir = resolve_snapshot_dir(args.legacy_snapshot_dir)
+        snapshot = load_snapshot(snapshot_dir)
+        client = create_supabase_client()
+        imported = import_snapshot(snapshot, client)
+    except Exception as exc:
+        print(f"Legacy snapshot import failed ({type(exc).__name__}).")
+        return 1
 
-# 2. Migrate Last Seen (tnc_lastseen_v1.json -> user_activity)
-lastseen = load_json("tnc_lastseen_v1.json")
-if lastseen:
-    print(f"Migrating {len(lastseen)} user_activity records...")
-    records = []
-    for user_id, timestamp in lastseen.items():
-        records.append({"user_id": user_id, "last_seen": timestamp})
-    
-    # Supabase allows bulk upsert
-    if records:
-        try:
-            # Upsert in chunks of 1000 to be safe
-            chunk_size = 1000
-            for i in range(0, len(records), chunk_size):
-                chunk = records[i:i+chunk_size]
-                supabase.table("user_activity").upsert(chunk).execute()
-            print("user_activity migrated successfully.")
-        except Exception as e:
-            print(f"Error migrating user_activity: {e}")
+    print(f"Imported {imported} legacy snapshot file(s) without replacing existing rows.")
+    return 0
 
-# 3. Migrate Silver Pieces (tnc_sp_v32.json -> user_economy)
-sp_data = load_json("tnc_sp_v32.json")
-if sp_data:
-    history = sp_data.get("history", {})
-    print(f"Migrating {len(history)} user_economy records...")
-    records = []
-    for user_id, sp in history.items():
-        records.append({"user_id": user_id, "silver_pieces": int(sp)})
-        
-    if records:
-        try:
-            chunk_size = 1000
-            for i in range(0, len(records), chunk_size):
-                chunk = records[i:i+chunk_size]
-                supabase.table("user_economy").upsert(chunk).execute()
-            print("user_economy migrated successfully.")
-        except Exception as e:
-            print(f"Error migrating user_economy: {e}")
 
-# 4. Migrate TTS Config (tnc_tts_config_v1.json -> tts_config)
-tts_data = load_json("tnc_tts_config_v1.json")
-if tts_data:
-    print(f"Migrating {len(tts_data)} tts_config records...")
-    records = []
-    for user_id, voice in tts_data.items():
-        records.append({"user_id": user_id, "voice": voice})
-        
-    if records:
-        try:
-            chunk_size = 1000
-            for i in range(0, len(records), chunk_size):
-                chunk = records[i:i+chunk_size]
-                supabase.table("tts_config").upsert(chunk).execute()
-            print("tts_config migrated successfully.")
-        except Exception as e:
-            print(f"Error migrating tts_config: {e}")
-
-print("Migration completed!")
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -1,81 +1,87 @@
-import os
 import re
 import aiohttp
 import asyncio
+from copy import deepcopy
 import discord
 from discord import app_commands
 from discord.ext import commands
 
-from core.config import STORAGE_DIR, GUILD_NAME, GUILD_TAG, GUILD_ID
-from core.storage import load_json, save_json
+from core.config import GUILD_NAME, GUILD_TAG, GUILD_ID
 from core.permissions import is_officer
-from core.database import execute
+from core.db import async_execute
+from core.config_store import get_config_async, invalidate
+
 
 class OnboardConfig:
-    def __init__(self):
+    def __init__(self, data=None):
         self.guild_id = str(GUILD_ID)
-        self.data = self._fetch_data()
-        
-    def _fetch_data(self):
-        try:
-            response, err = execute(lambda c: c.table("guild_config").select("*").eq("guild_id", self.guild_id))
-            if err:
-                print(f"Error fetching supabase config: {err}")
-                return {"is_onboard_enabled": True}
-            if response and response.data:
-                return response.data[0]
-            else:
-                default_data = {"guild_id": self.guild_id, "is_onboard_enabled": True}
-                _, err2 = execute(lambda c: c.table("guild_config").insert(default_data))
-                if err2:
-                    print(f"Error inserting default guild_config: {err2}")
-                return default_data
-        except Exception as e:
-            print(f"Error fetching supabase config: {e}")
-            return {"is_onboard_enabled": True}
-            
-    def save(self):
-        try:
-            update_data = {k: v for k, v in self.data.items() if k != "guild_id"}
-            _, err = execute(lambda c: c.table("guild_config").update(update_data).eq("guild_id", self.guild_id))
-            if err:
-                print(f"Error saving supabase config: {err}")
-        except Exception as e:
-            print(f"Error saving supabase config: {e}")
+        self.data = deepcopy(data) if data is not None else None
+
+    async def load(self):
+        data = await get_config_async(
+            "guild_config",
+            self.guild_id,
+            default=lambda: {"guild_id": self.guild_id, "is_onboard_enabled": True},
+        )
+        self.data = data
+        return data
+
+    async def save(self, changed):
+        current, error = await async_execute(
+            lambda client: client.table("guild_config").select("guild_id").eq(
+                "guild_id", self.guild_id
+            ).maybe_single()
+        )
+        if error:
+            raise RuntimeError(f"Không đọc được guild_config: {error}")
+        if not current or not current.data:
+            _, error = await async_execute(
+                lambda client: client.table("guild_config").insert(
+                    {"guild_id": self.guild_id, "is_onboard_enabled": True}
+                )
+            )
+            if error:
+                raise RuntimeError(f"Không thể khởi tạo guild_config: {error}")
+        _, error = await async_execute(
+            lambda client: client.table("guild_config").update(changed).eq("guild_id", self.guild_id)
+        )
+        if error:
+            raise RuntimeError(f"Không thể lưu cấu hình Onboarding: {error}")
+        invalidate("guild_config", self.guild_id)
+        self.data = await get_config_async(
+            "guild_config",
+            self.guild_id,
+            default=lambda: {"guild_id": self.guild_id, "is_onboard_enabled": True},
+        )
+        return self.data
 
     @property
     def is_enabled(self):
-        return self.data.get("is_onboard_enabled", True)
-        
-    @is_enabled.setter
-    def is_enabled(self, value: bool):
-        self.data["is_onboard_enabled"] = value
-        self.save()
+        return self.data.get("is_onboard_enabled", True) if self.data else True
 
     @property
     def apply_channel_id(self):
-        return self.data.get("apply_channel_id")
-        
+        return self.data.get("apply_channel_id") if self.data else None
+
     @property
     def member_role_id(self):
-        return self.data.get("member_role_id")
-        
+        return self.data.get("member_role_id") if self.data else None
+
     @property
     def officer_role_id(self):
-        return self.data.get("officer_role_id")
-        
+        return self.data.get("officer_role_id") if self.data else None
+
     @property
     def rules_channel_id(self):
-        return self.data.get("rules_channel_id")
-        
+        return self.data.get("rules_channel_id") if self.data else None
+
     @property
     def chat_channel_id(self):
-        return self.data.get("chat_channel_id")
-        
+        return self.data.get("chat_channel_id") if self.data else None
+
     @property
     def question_channel_id(self):
-        return self.data.get("question_channel_id")
-
+        return self.data.get("question_channel_id") if self.data else None
 
 def _format_yob(yob: str) -> str:
     """Format năm sinh cho nickname: 2005→2k5, 2000→2k, 1998→98. Giữ nguyên nếu không phải 4 số."""
@@ -83,30 +89,43 @@ def _format_yob(yob: str) -> str:
     if formatted.isdigit():
         if len(formatted) == 4:
             if formatted.startswith("20"):
-                formatted = f"2k{formatted[3:]}" if formatted[3:] != "0" else "2k"
+                suffix = int(formatted[2:])
+                formatted = f"2k{suffix}" if suffix else "2k"
             elif formatted.startswith("19"):
                 formatted = formatted[2:]
     return formatted
+
+def application_marker(thread):
+    return f"https://discord.com/channels/{thread.guild.id}/{thread.id}"
+
+
+def is_application_report(message, thread):
+    return any(embed.url == application_marker(thread) for embed in message.embeds)
 
 
 def get_onboard_data(interaction: discord.Interaction):
     thread = interaction.message.channel
     target_user_id = thread.owner_id
     embed = interaction.message.embeds[0]
-    title = embed.title
-    if ":" in title:
-        ign_name = title.split(":", 1)[1].strip()
-    else:
-        ign_name = title
-        
+    title = embed.title or ""
+    ign_name = title.split(":", 1)[-1].strip()
     footer = embed.footer.text if embed.footer else ""
     yob = ""
     if footer and "YOB:" in footer:
-        parts = footer.split("|")
-        for part in parts:
+        for part in footer.split("|"):
             if "YOB:" in part:
-                yob = part.split("YOB:")[1].strip()
+                yob = part.split("YOB:", 1)[1].strip()
     return target_user_id, ign_name, yob, embed
+
+
+def status_from_title(title):
+    if title and title.startswith("⏳ Chờ duyệt:"):
+        return "submitted"
+    if title and title.startswith("✅ Đã duyệt:"):
+        return "approved"
+    if title and title.startswith("❌ Đã từ chối:"):
+        return "rejected"
+    return None
 
 class RulesConfirmView(discord.ui.View):
     def __init__(self, cog: 'Onboarding'):
@@ -138,130 +157,247 @@ class ApplicantConfirmView(discord.ui.View):
     async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
         target_user_id, ign_name, yob, embed = get_onboard_data(interaction)
         if interaction.user.id != target_user_id:
-            await interaction.response.send_message("❌ Nút này chỉ dành cho người nộp đơn!", ephemeral=True)
-            return
-            
-        officer_mention = f"<@&{self.cog.config.officer_role_id}>" if self.cog.config.officer_role_id else "@Officer"
-        msg_text = (
-            f"⚠️ **Trạng thái:** Thành viên đã gửi đơn in-game. Mời Officer kiểm tra hòm thư và duyệt đơn bên dưới."
-        )
-        
-        embed.color = discord.Color.orange()
-        embed.title = f"⏳ Chờ duyệt: {ign_name}"
-        view = OfficerApprovalView(self.cog)
-        
-        await interaction.response.edit_message(content=msg_text, embed=embed, view=view)
-        await interaction.channel.send(
-            f"🔔 {officer_mention}: Thành viên **{ign_name}** (<@{target_user_id}>) đã nộp đơn in-game! Vui lòng kiểm tra mail và duyệt đơn nhé."
-        )
+            return await interaction.response.send_message("❌ Nút này chỉ dành cho người nộp đơn!", ephemeral=True)
+        if embed.title.startswith(("⏳ Chờ duyệt:", "✅ Đã duyệt:", "❌ Đã từ chối:")):
+            return await interaction.response.send_message("✅ Đơn này đã gửi Officer duyệt.", ephemeral=True)
+
+        await interaction.response.defer()
+        async with self.cog.application_lock(interaction.message.id):
+            if interaction.message.id in self.cog.submitted_applications:
+                return await interaction.followup.send("✅ Đơn này đã gửi Officer duyệt.", ephemeral=True)
+            self.cog.submitted_applications.add(interaction.message.id)
+            embed.color = discord.Color.orange()
+            embed.title = f"⏳ Chờ duyệt: {ign_name}"
+            view = OfficerApprovalView(self.cog)
+            try:
+                await interaction.message.edit(
+                    content="⚠️ **Trạng thái:** Thành viên đã gửi đơn in-game. Mời Officer kiểm tra hòm thư và duyệt đơn bên dưới.",
+                    embed=embed,
+                    view=view,
+                )
+            except Exception:
+                self.cog.submitted_applications.discard(interaction.message.id)
+                raise
+            self.cog.bot.add_view(view, message_id=interaction.message.id)
+            officer_mention = f"<@&{self.cog.config.officer_role_id}>" if self.cog.config.officer_role_id else "@Officer"
+            try:
+                await interaction.channel.send(
+                    f"🔔 {officer_mention}: Thành viên **{ign_name}** (<@{target_user_id}>) đã nộp đơn in-game! Vui lòng kiểm tra mail và duyệt đơn nhé."
+                )
+            except Exception as error:
+                await interaction.followup.send(f"❌ Đơn đã gửi nhưng không thể ping Officer: `{error}`", ephemeral=True)
 
 class OfficerApprovalView(discord.ui.View):
-    def __init__(self, cog: 'Onboarding'):
+    def __init__(self, cog: 'Onboarding', status="submitted", renamed=False):
         super().__init__(timeout=None)
         self.cog = cog
+        self.status = status
+        self.renamed = renamed
+        if status in {"approved", "rejected"}:
+            for child in self.children:
+                if child.custom_id in {"onboard_approve", "onboard_reject"}:
+                    child.disabled = True
+        if status == "rejected":
+            for child in self.children:
+                child.disabled = True
+        if renamed:
+            for child in self.children:
+                if child.custom_id == "onboard_rename":
+                    child.disabled = True
+
+    async def _set_message_state(self, message, embed, status, ign_name, yob, *, content, actor):
+        prefix = "✅ Đã duyệt" if status == "approved" else "❌ Đã từ chối"
+        embed.title = f"{prefix}: {ign_name}"
+        embed.color = discord.Color.green() if status == "approved" else discord.Color.red()
+        footer = f"YOB: {yob} | {status.title()} bởi {actor}"
+        if message.id in self.cog.renamed_applications:
+            footer += " | Nickname đã đổi"
+        embed.set_footer(text=footer)
+        view = OfficerApprovalView(
+            self.cog,
+            status=status,
+            renamed=message.id in self.cog.renamed_applications,
+        )
+        await message.edit(content=content, embed=embed, view=view)
+        self.cog.application_states[message.id] = status
+        self.cog.bot.add_view(view, message_id=message.id)
 
     @discord.ui.button(label="Accept", style=discord.ButtonStyle.green, custom_id="onboard_approve")
     async def approve(self, interaction: discord.Interaction, button: discord.ui.Button):
-        from core.permissions import is_officer
         if not is_officer(interaction.user):
-            await interaction.response.send_message("❌ Xin lỗi, chỉ Officer trở lên mới được duyệt!", ephemeral=True)
-            return
-            
+            return await interaction.response.send_message("❌ Xin lỗi, chỉ Officer trở lên mới được duyệt!", ephemeral=True)
         await interaction.response.defer()
-        target_user_id, ign_name, yob, embed = get_onboard_data(interaction)
-        guild = interaction.guild
-        member = guild.get_member(target_user_id) if guild else None
-        if member:
-            role_id = self.cog.config.member_role_id
-            if not role_id:
-                await interaction.followup.send("⚠️ Cảnh báo: Chưa cài đặt Member Role nên bot không thể cấp role. Dùng `/recuibot setup_roles` để cài!", ephemeral=False)
-            else:
-                role = guild.get_role(int(role_id))
-                if not role:
-                    await interaction.followup.send("⚠️ Cảnh báo: Role ID đã lưu không tồn tại (có thể role đã bị xóa). Dùng `/recuibot setup_roles` để cài lại!", ephemeral=False)
+        message_id = interaction.message.id
+        async with self.cog.application_lock(message_id):
+            embed = interaction.message.embeds[0]
+            state = self.cog.application_states.get(message_id, "submitted")
+            if state != "submitted":
+                return await interaction.followup.send("✅ Đơn này đã được xử lý.", ephemeral=True)
+            target_user_id, ign_name, yob, _ = get_onboard_data(interaction)
+            guild = interaction.guild
+            member = guild.get_member(target_user_id) if guild else None
+            if member:
+                role_id = self.cog.config.member_role_id
+                role = guild.get_role(int(role_id)) if role_id else None
+                if not role_id:
+                    await interaction.followup.send(
+                        "⚠️ Chưa cài đặt Member Role nên bot không thể cấp role. Dùng `/recuibot setup_roles` để cài!",
+                        ephemeral=True,
+                    )
+                elif not role:
+                    await interaction.followup.send(
+                        "⚠️ Role ID đã lưu không tồn tại. Dùng `/recuibot setup_roles` để cài lại!",
+                        ephemeral=True,
+                    )
                 else:
                     try:
                         await member.add_roles(role)
-                    except discord.Forbidden:
-                        await interaction.followup.send("⚠️ Cảnh báo: Bot không có quyền cấp Role này (Role của bot đang đứng thấp hơn Role cần cấp, hoặc bot thiếu quyền Manage Roles)!", ephemeral=False)
-                    except Exception as e:
-                        await interaction.followup.send(f"⚠️ Cảnh báo: Lỗi khi cấp role: {e}", ephemeral=False)
-        else:
-            await interaction.followup.send("⚠️ Cảnh báo: Không tìm thấy thành viên này trong server (có thể họ đã out).", ephemeral=False)
-        
-        for child in self.children:
-            if child.custom_id in ["onboard_approve", "onboard_reject"]:
-                child.disabled = True
-            
-        embed.color = discord.Color.green()
-        embed.title = f"✅ Đã duyệt: {ign_name}"
-        embed.set_footer(text=f"YOB: {yob} | Duyệt bởi {interaction.user.display_name}")
-        await interaction.message.edit(content=f"✅ Đơn apply của **{ign_name}** đã được duyệt thành công bởi <@{interaction.user.id}>.", embed=embed, view=self)
-        
-        c_rules = f"<#{self.cog.config.rules_channel_id}>" if self.cog.config.rules_channel_id else "Kênh Rules"
-        c_chat = f"<#{self.cog.config.chat_channel_id}>" if self.cog.config.chat_channel_id else "Kênh Guild-chat"
-        c_question = f"<#{self.cog.config.question_channel_id}>" if self.cog.config.question_channel_id else "Kênh Hỏi đáp"
-        
-        welcome_msg = (
-            f"🎉 Chào mừng <@{target_user_id}> đã gia nhập {GUILD_TAG}!\n\n"
-            f"🔹 Ghé qua {c_chat} để đàm đạo, chém gió và giao lưu cùng anh em.\n"
-            f"🔹 Bất cứ khi nào có thắc mắc hay cần hỗ trợ gì về game, bro cứ hét thẳng vào {c_question} nhé, mọi người sẽ giải đáp nhiệt tình.\n\n"
-            f"Khi vào guild hãy cư xử đúng mực, kính trên nhường dưới, không toxic và không gây war nha.\n"
-            f"Chúc bro chơi game vui vẻ ❤️"
-        )
-        await interaction.channel.send(welcome_msg)
+                    except Exception as error:
+                        await interaction.followup.send(f"⚠️ Không thể cấp role: `{error}`", ephemeral=True)
+            else:
+                await interaction.followup.send(
+                    "⚠️ Không tìm thấy thành viên này trong server (có thể họ đã out).", ephemeral=True
+                )
+
+            message = interaction.message
+            try:
+                await self._set_message_state(
+                    message,
+                    embed,
+                    "approved",
+                    ign_name,
+                    yob,
+                    content=f"✅ Đơn apply của **{ign_name}** đã được duyệt bởi <@{interaction.user.id}>.",
+                    actor=interaction.user.display_name,
+                )
+            except Exception as error:
+                return await interaction.followup.send(f"❌ Không thể cập nhật trạng thái đơn: `{error}`", ephemeral=True)
+
+            c_chat = f"<#{self.cog.config.chat_channel_id}>" if self.cog.config.chat_channel_id else "Kênh Guild-chat"
+            c_question = f"<#{self.cog.config.question_channel_id}>" if self.cog.config.question_channel_id else "Kênh Hỏi đáp"
+            welcome_msg = (
+                f"🎉 Chào mừng <@{target_user_id}> đã gia nhập {GUILD_TAG}!\n\n"
+                f"🔹 Ghé qua {c_chat} để đàm đạo, chém gió và giao lưu cùng anh em.\n"
+                f"🔹 Bất cứ khi nào có thắc mắc hay cần hỗ trợ gì về game, bro cứ hét thẳng vào {c_question} nhé, mọi người sẽ giải đáp nhiệt tình.\n\n"
+                "Khi vào guild hãy cư xử đúng mực, kính trên nhường dưới, không toxic và không gây war nha.\n"
+                "Chúc bro chơi game vui vẻ ❤️"
+            )
+            try:
+                await interaction.channel.send(welcome_msg)
+            except Exception as error:
+                await interaction.followup.send(f"❌ Đơn đã duyệt nhưng không thể gửi lời chào: `{error}`", ephemeral=True)
 
     @discord.ui.button(label="Rename", style=discord.ButtonStyle.primary, custom_id="onboard_rename")
     async def rename_member(self, interaction: discord.Interaction, button: discord.ui.Button):
-        from core.permissions import is_officer
         if not is_officer(interaction.user):
-            await interaction.response.send_message("❌ Xin lỗi, chỉ Officer trở lên mới được dùng!", ephemeral=True)
-            return
-            
-        target_user_id, ign_name, yob, embed = get_onboard_data(interaction)
-        guild = interaction.guild
-        member = guild.get_member(target_user_id) if guild else None
+            return await interaction.response.send_message("❌ Xin lỗi, chỉ Officer trở lên mới được dùng!", ephemeral=True)
+        member = interaction.guild.get_member(interaction.message.channel.owner_id) if interaction.guild else None
         if not member:
-            await interaction.response.send_message("❌ Không tìm thấy user này trong server (có thể họ đã out).", ephemeral=True)
-            return
-            
-        formatted_yob = _format_yob(yob)
-        new_nick = f"[{GUILD_TAG}] {ign_name} {formatted_yob}".strip()
-        if len(new_nick) > 32:
-            new_nick = new_nick[:32]
-            
-        try:
-            await member.edit(nick=new_nick)
-            button.disabled = True
-            await interaction.response.edit_message(view=self)
+            return await interaction.response.send_message("❌ Không tìm thấy user này trong server (có thể họ đã out).", ephemeral=True)
+        target_user_id, ign_name, yob, embed = get_onboard_data(interaction)
+        new_nick = f"[{GUILD_TAG}] {ign_name} {_format_yob(yob)}".strip()[:32]
+        await interaction.response.defer()
+        async with self.cog.application_lock(interaction.message.id):
+            if interaction.message.id in self.cog.renamed_applications:
+                return await interaction.followup.send("✅ Nickname của đơn này đã được cập nhật.", ephemeral=True)
+            try:
+                await member.edit(nick=new_nick)
+                footer = embed.footer.text if embed.footer else f"YOB: {yob}"
+                embed.set_footer(text=f"{footer} | Nickname đã đổi")
+                status = self.cog.application_states.get(interaction.message.id, "submitted")
+                view = OfficerApprovalView(self.cog, status=status, renamed=True)
+                await interaction.message.edit(embed=embed, view=view)
+                self.cog.renamed_applications.add(interaction.message.id)
+                self.cog.bot.add_view(view, message_id=interaction.message.id)
+            except Exception as error:
+                return await interaction.followup.send(f"❌ Không thể đổi nickname: `{error}`", ephemeral=True)
             await interaction.followup.send(f"✅ Đã tự động đổi tên thành `{new_nick}`!", ephemeral=False)
-        except discord.Forbidden:
-            await interaction.response.send_message("❌ Lỗi quyền: Bot không có quyền đổi tên user này (có thể role của họ cao hơn bot hoặc bot chưa có quyền Manage Nicknames).", ephemeral=False)
-        except Exception as e:
-            await interaction.response.send_message(f"❌ Có lỗi xảy ra: {e}", ephemeral=False)
 
     @discord.ui.button(label="Từ chối", style=discord.ButtonStyle.red, custom_id="onboard_reject")
     async def reject(self, interaction: discord.Interaction, button: discord.ui.Button):
-        from core.permissions import is_officer
         if not is_officer(interaction.user):
-            await interaction.response.send_message("❌ Xin lỗi, chỉ Officer trở lên mới được duyệt!", ephemeral=True)
-            return
-            
+            return await interaction.response.send_message("❌ Xin lỗi, chỉ Officer trở lên mới được duyệt!", ephemeral=True)
         await interaction.response.defer()
-        target_user_id, ign_name, yob, embed = get_onboard_data(interaction)
-        for child in self.children:
-            child.disabled = True
-            
-        embed.color = discord.Color.red()
-        embed.title = f"❌ Đã từ chối: {ign_name}"
-        embed.set_footer(text=f"YOB: {yob} | Từ chối bởi {interaction.user.display_name}")
-        await interaction.message.edit(content=f"❌ Đơn apply của **{ign_name}** đã bị từ chối bởi <@{interaction.user.id}>.", embed=embed, view=self)
-
+        message_id = interaction.message.id
+        async with self.cog.application_lock(message_id):
+            state = self.cog.application_states.get(message_id, "submitted")
+            if state != "submitted":
+                return await interaction.followup.send("✅ Đơn này đã được xử lý.", ephemeral=True)
+            _, ign_name, yob, embed = get_onboard_data(interaction)
+            try:
+                await self._set_message_state(
+                    interaction.message,
+                    embed,
+                    "rejected",
+                    ign_name,
+                    yob,
+                    content=f"❌ Đơn apply của **{ign_name}** đã bị từ chối bởi <@{interaction.user.id}>.",
+                    actor=interaction.user.display_name,
+                )
+            except Exception as error:
+                await interaction.followup.send(f"❌ Không thể cập nhật trạng thái đơn: `{error}`", ephemeral=True)
 class Onboarding(commands.Cog):
 
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.config = OnboardConfig()
+        self.config_loaded = False
+        self._application_locks = {}
+        self.application_states = {}
+        self.submitted_applications = set()
+        self.renamed_applications = set()
+
+    def application_lock(self, message_id):
+        return self._application_locks.setdefault(message_id, asyncio.Lock())
+
+    async def cog_load(self):
+        try:
+            await self.config.load()
+            self.config_loaded = True
+        except Exception as error:
+            print(f"❌ Không thể tải cấu hình Onboarding: {error}")
+            return
+
+        self.bot.add_view(RulesConfirmView(self))
+        self.bot.add_view(ApplicantConfirmView(self))
+        forum_id = self.config.apply_channel_id
+        forum = self.bot.get_channel(int(forum_id)) if forum_id else None
+        if not isinstance(forum, discord.ForumChannel):
+            return
+
+        threads = {thread.id: thread for thread in forum.threads}
+        try:
+            async for thread in forum.archived_threads(limit=None):
+                threads[thread.id] = thread
+        except Exception as error:
+            print(f"⚠️ Không tải được archived onboarding threads: {error}")
+
+        for thread in threads.values():
+            try:
+                async for message in thread.history(limit=None):
+                    if not is_application_report(message, thread):
+                        continue
+                    status = status_from_title(message.embeds[0].title)
+                    if status:
+                        self.application_states[message.id] = status
+                        self.submitted_applications.add(message.id)
+                        renamed = bool(
+                            message.embeds[0].footer
+                            and "Nickname đã đổi" in message.embeds[0].footer.text
+                        )
+                        if renamed:
+                            self.renamed_applications.add(message.id)
+                        self.bot.add_view(
+                            OfficerApprovalView(self, status, renamed),
+                            message_id=message.id,
+                        )
+            except Exception as error:
+                print(f"⚠️ Không khôi phục được view onboarding cho thread {thread.id}: {error}")
+
+    async def _save_config(self, changed):
+        if not self.config_loaded:
+            raise RuntimeError("Cấu hình Onboarding chưa tải được.")
+        return await self.config.save(changed)
 
     async def fetch_albion_player(self, ign: str):
         try:
@@ -289,6 +425,17 @@ class Onboarding(commands.Cog):
         return count >= 4  
 
     async def process_apply_thread(self, thread: discord.Thread, msg: discord.Message = None):
+        async with self.application_lock(thread.id):
+            try:
+                async for message in thread.history(limit=None):
+                    if is_application_report(message, thread):
+                        return
+            except discord.Forbidden:
+                print(f"❌ LỖI QUYỀN: Bot không thể kiểm tra đơn hiện có trong {thread.parent.name}")
+                return
+            await self._process_apply_thread(thread, msg)
+
+    async def _process_apply_thread(self, thread: discord.Thread, msg: discord.Message = None):
         try:
             if not msg:
                 try:
@@ -386,7 +533,7 @@ class Onboarding(commands.Cog):
             if yob:
                 embed.set_footer(text=f"YOB: {yob}")
             
-            view = RulesConfirmView(self)
+            embed.url = application_marker(thread)
             
             rules_channel = f"<#{self.config.rules_channel_id}>" if self.config.rules_channel_id else "Kênh Rules"
             msg_text = (
@@ -400,63 +547,69 @@ class Onboarding(commands.Cog):
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
-        print(f"DEBUG Onboarding: on_message triggered. is_enabled: {self.config.is_enabled}")
-        if not self.config.is_enabled: return
-        if message.author.bot: return
-        if not isinstance(message.channel, discord.Thread): return
-        
-        apply_ch = self.config.apply_channel_id
-        if not apply_ch or str(message.channel.parent_id) != str(apply_ch):
+        if not self.config_loaded or not self.config.is_enabled or message.author.bot:
             return
-            
-        print(f"DEBUG Onboarding: Nhận tin nhắn trong kênh apply {message.channel.name}")
-        
+        if not isinstance(message.channel, discord.Thread):
+            return
+        apply_channel_id = self.config.apply_channel_id
+        if not apply_channel_id or str(message.channel.parent_id) != str(apply_channel_id):
+            return
         if message.author.id != message.channel.owner_id:
-            print("DEBUG Onboarding: Người gửi không phải chủ thread, bỏ qua.")
             return
-            
-        # Nếu đây là tin nhắn gốc (starter message) của Thread, xử lý luôn
-        if message.id == message.channel.id:
-            print("DEBUG Onboarding: Tin nhắn gốc của Forum, xử lý process_apply_thread.")
-            await self.process_apply_thread(message.channel, msg=message)
-            return
-            
-        async for m in message.channel.history(limit=20):
-            if m.author == self.bot.user and m.embeds and "Báo cáo tự động" in str(m.embeds[0].title):
-                return
-                
-        if message.attachments or "http" in message.content:
-            await self.process_apply_thread(message.channel)
+        if message.id == message.channel.id or message.attachments or "http" in message.content:
+            await self.process_apply_thread(
+                message.channel,
+                msg=message if message.id == message.channel.id else None,
+            )
 
     @commands.Cog.listener()
     async def on_config_reload(self):
-        # Triggered by webhook to reload config from Supabase
-        self.config = OnboardConfig()
-        print("✅ Đã tự động cập nhật cấu hình Onboarding từ Dashboard!")
+        invalidate("guild_config", self.config.guild_id)
+        try:
+            await self.config.load()
+            self.config_loaded = True
+        except Exception as error:
+            self.config_loaded = False
+            print(f"❌ Không thể tải lại cấu hình Onboarding: {error}")
+    async def save_config_command(self, interaction, changed, success):
+        if not self.config_loaded:
+            return await interaction.response.send_message(
+                "❌ Cấu hình Onboarding chưa tải được.", ephemeral=True
+            )
+        await interaction.response.defer(ephemeral=True)
+        try:
+            await self._save_config(changed)
+        except Exception as error:
+            return await interaction.followup.send(f"❌ Không thể lưu cấu hình: `{error}`", ephemeral=True)
+        await interaction.edit_original_response(content=success)
     onboard_group = app_commands.Group(name="recuibot", description="Hệ thống Bot Thư Ký duyệt đơn")
 
     @onboard_group.command(name="toggle", description="Bật/Tắt chế độ Thư Ký tự động")
     async def onboard_toggle(self, interaction: discord.Interaction):
         if not is_officer(interaction.user):
-            await interaction.response.send_message("❌ Chỉ Ban quản trị mới được dùng!", ephemeral=True)
-            return
-        self.config.is_enabled = not self.config.is_enabled
-        status = "BẬT" if self.config.is_enabled else "TẮT"
-        await interaction.response.send_message(f"✅ Đã **{status}** tính năng tự động check đơn thành viên mới.", ephemeral=True)
+            return await interaction.response.send_message("❌ Chỉ Ban quản trị mới được dùng!", ephemeral=True)
+        enabled = not self.config.is_enabled
+        status = "BẬT" if enabled else "TẮT"
+        await self.save_config_command(
+            interaction,
+            {"is_onboard_enabled": enabled},
+            f"✅ Đã **{status}** tính năng tự động check đơn thành viên mới.",
+        )
 
     @onboard_group.command(name="set_apply_channel", description="Chỉ định kênh Forum dùng để nộp đơn")
     async def onboard_set_apply_channel(self, interaction: discord.Interaction, apply: discord.abc.GuildChannel):
         if not is_officer(interaction.user):
-            await interaction.response.send_message("❌ Xin lỗi, chỉ Ban quản trị mới được quyền chỉnh!", ephemeral=True)
-            return
-            
+            return await interaction.response.send_message("❌ Xin lỗi, chỉ Ban quản trị mới được quyền chỉnh!", ephemeral=True)
         if not isinstance(apply, discord.ForumChannel):
-            await interaction.response.send_message("❌ Kênh Apply bắt buộc phải là một **Kênh Diễn Đàn (Forum Channel)**! Vui lòng tạo một kênh Diễn đàn mới hoặc chọn đúng kênh Diễn đàn.", ephemeral=True)
-            return
-        
-        self.config.data["apply_channel_id"] = str(apply.id)
-        self.config.save()
-        await interaction.response.send_message(f"✅ Đã chỉ định kênh Apply thành công: <#{apply.id}>", ephemeral=True)
+            return await interaction.response.send_message(
+                "❌ Kênh Apply bắt buộc phải là một **Kênh Diễn Đàn (Forum Channel)**! Vui lòng tạo một kênh Diễn đàn mới hoặc chọn đúng kênh Diễn đàn.",
+                ephemeral=True,
+            )
+        await self.save_config_command(
+            interaction,
+            {"apply_channel_id": str(apply.id)},
+            f"✅ Đã chỉ định kênh Apply thành công: <#{apply.id}>",
+        )
 
     @onboard_group.command(name="setup_channels", description="Cài đặt các kênh cần thiết để bot tag trong lời chào")
     @app_commands.describe(
@@ -464,47 +617,52 @@ class Onboarding(commands.Cog):
         guild_chat_id="Copy ID của Kênh Guild-chat và dán vào đây",
         question_id="Copy ID của Kênh Hỏi đáp và dán vào đây"
     )
-    async def onboard_setup_channels(self, interaction: discord.Interaction, 
+    async def onboard_setup_channels(self, interaction: discord.Interaction,
                                      rules_id: str,
                                      guild_chat_id: str,
                                      question_id: str):
         if not is_officer(interaction.user):
-            await interaction.response.send_message("❌ Xin lỗi, chỉ Ban quản trị mới được quyền chỉnh!", ephemeral=True)
-            return
-        
-        def extract_id(val: str):
-            import re
-            m = re.search(r'\d+', val)
-            return m.group(0) if m else val.strip()
+            return await interaction.response.send_message("❌ Xin lỗi, chỉ Ban quản trị mới được quyền chỉnh!", ephemeral=True)
 
-        self.config.data["rules_channel_id"] = extract_id(rules_id)
-        self.config.data["chat_channel_id"] = extract_id(guild_chat_id)
-        self.config.data["question_channel_id"] = extract_id(question_id)
-        self.config.save()
-        
-        await interaction.response.send_message(
-            f"✅ Đã lưu cấu hình kênh:\n"
-            f"- Rules: <#{self.config.data['rules_channel_id']}>\n"
-            f"- Chat: <#{self.config.data['chat_channel_id']}>\n"
-            f"- Q&A: <#{self.config.data['question_channel_id']}>", 
-            ephemeral=True
+        def extract_id(value):
+            match = re.search(r'\d+', value)
+            return match.group(0) if match else value.strip()
+
+        rules = extract_id(rules_id)
+        chat = extract_id(guild_chat_id)
+        question = extract_id(question_id)
+        await self.save_config_command(
+            interaction,
+            {
+                "rules_channel_id": rules,
+                "chat_channel_id": chat,
+                "question_channel_id": question,
+            },
+            f"✅ Đã lưu cấu hình kênh:\n- Rules: <#{rules}>\n- Chat: <#{chat}>\n- Q&A: <#{question}>",
         )
 
     @onboard_group.command(name="setup_roles", description="Cài đặt Role Officer và Role Member")
-    async def onboard_setup_roles(self, interaction: discord.Interaction, 
+    async def onboard_setup_roles(self, interaction: discord.Interaction,
                                   officer_role: discord.Role,
                                   member_role: discord.Role):
         if not is_officer(interaction.user):
-            await interaction.response.send_message("❌ Xin lỗi, chỉ Ban quản trị mới được quyền chỉnh!", ephemeral=True)
-            return
-        
-        self.config.data["officer_role_id"] = str(officer_role.id)
-        self.config.data["member_role_id"] = str(member_role.id)
-        self.config.save()
-        await interaction.response.send_message(f"✅ Đã lưu cấu hình Role!", ephemeral=True)
+            return await interaction.response.send_message("❌ Xin lỗi, chỉ Ban quản trị mới được quyền chỉnh!", ephemeral=True)
+        await self.save_config_command(
+            interaction,
+            {
+                "officer_role_id": str(officer_role.id),
+                "member_role_id": str(member_role.id),
+            },
+            "✅ Đã lưu cấu hình Role!",
+        )
 
     @onboard_group.command(name="list", description="Xem cấu hình & trạng thái hệ thống Onboarding (Recuibot)")
     async def onboard_list(self, interaction: discord.Interaction):
+        if not self.config_loaded:
+            return await interaction.response.send_message(
+                "❌ Không thể đọc cấu hình Onboarding. Vui lòng thử lại sau.",
+                ephemeral=True,
+            )
         data = self.config
         enabled = data.is_enabled
         apply_ch = data.apply_channel_id
@@ -555,8 +713,4 @@ class Onboarding(commands.Cog):
 
 
 async def setup(bot: commands.Bot):
-    cog = Onboarding(bot)
-    await bot.add_cog(cog)
-    bot.add_view(RulesConfirmView(cog))
-    bot.add_view(ApplicantConfirmView(cog))
-    bot.add_view(OfficerApprovalView(cog))
+    await bot.add_cog(Onboarding(bot))
