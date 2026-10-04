@@ -83,6 +83,19 @@ Bot expose Flask server tại `http://localhost:5000` (Online: [bot-albion-tnc.o
 
 Dashboard `/api/bot-status` trả `main_bot` và `chatbot`, lấy heartbeat readiness/freshness từ DB.
 
+## Kiểm tra trước khi push
+
+CI dùng Python 3.11. Trong môi trường phát triển cô lập, cài `requirements.txt` và `pytest`, rồi
+chạy từ thư mục gốc:
+
+```bash
+python -m compileall -q bot
+pytest bot/tests -v
+```
+
+CI chạy `pytest tests -v` từ `bot/`. `pytest.ini` cấu hình `pythonpath = . bot` để cả hai cách
+chạy đều import được module ở thư mục gốc (như `test_api_key/`) và trong `bot/`.
+
 ## Lưu ý bảo mật
 
 - Không commit `.env`, DB credential, Discord token hoặc bank token. Dashboard trả
