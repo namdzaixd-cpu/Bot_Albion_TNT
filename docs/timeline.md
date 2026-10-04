@@ -4,6 +4,17 @@ Nhật ký tiến độ và các mốc phát triển của dự án TNC Manager 
 
 ---
 
+## 📅 2026-10-04: Tối Ưu Giao Diện Chuyển Bước Onboarding (Embed Tiến Độ & Nút Bấm Rõ Ràng)
+- **Mục tiêu:** Tối ưu hóa trải nghiệm chuyển tiếp giữa các bước 1 ➔ 2 ➔ 3 trong quy trình nộp đơn Multi-step Modal.
+- **Thay đổi chính:**
+  - `bot/cogs/onboarding.py`:
+    - Thêm Embed thanh tiến trình đo tiến độ trực quan (`33% ➔ 66% ➔ 100%`) sau mỗi lần gửi bước.
+    - Cải tiến nút chuyển bước với nhãn to, rõ ràng (`👉 Bấm vào đây để điền tiếp Bước 2 / 3`, `📝 Bấm vào đây để hoàn tất Bước 3 / 3`).
+    - Phản hồi hoàn tất đơn bằng Embed xanh lá chúc mừng kèm link điều hướng thẳng vào Thread bài nộp.
+- **Kết quả:** Code compile sạch sẽ, 66/66 unit tests passed, giao diện nộp đơn mượt mà và trực quan.
+
+---
+
 ## 📅 2026-10-04: Sửa Lỗi Nhận Diện ID Người Nộp Đơn (Tránh Bot Tự Đổi Tên & Tự Tag Mình)
 - **Mục tiêu:** Khắc phục lỗi bot tự đổi tên và tag chính mình khi Officer duyệt đơn (do `thread.owner_id` trả về ID của Bot khi Bot tự tạo Thread nộp đơn).
 - **Thay đổi chính:**

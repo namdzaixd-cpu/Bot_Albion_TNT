@@ -246,10 +246,20 @@ class ApplyStep1Modal(discord.ui.Modal, title="📝 Đơn Gia Nhập Guild TNC (
             "country": self.country.value.strip(),
             "source": self.source.value.strip(),
         }
+        embed = discord.Embed(
+            title="📋 TIẾN ĐỘ NỘP ĐƠN (1/3)",
+            description=(
+                "**Tiến độ:** `[██████░░░░░░░░░░]` **33%**\n\n"
+                "✅ **Bước 1/3:** Thông tin cá nhân *(Đã xong)*\n"
+                "⏳ **Bước 2/3:** Thiết bị & Kỹ năng chơi *(Đang chờ)*\n"
+                "⏳ **Bước 3/3:** Mục tiêu & Cam kết quy định *(Đang chờ)*\n\n"
+                "👇 **Bấm nút bên dưới để tiếp tục điền Bước 2 ngay nhé!**"
+            ),
+            color=discord.Color.blue()
+        )
         view = Step2LaunchView(self.cog, interaction.user.id)
         await interaction.response.send_message(
-            f"✅ **Đã hoàn thành Bước 1/3 (Thông tin cá nhân)!**\n"
-            f"👉 Nhấn vào nút bên dưới để tiếp tục điền **Bước 2/3 (Thiết bị & Kỹ năng chơi)**.",
+            embed=embed,
             view=view,
             ephemeral=True
         )
@@ -261,7 +271,7 @@ class Step2LaunchView(discord.ui.View):
         self.cog = cog
         self.user_id = user_id
 
-    @discord.ui.button(label="Điền tiếp Bước 2 / 3", style=discord.ButtonStyle.primary, emoji="👉")
+    @discord.ui.button(label="👉 Bấm vào đây để điền tiếp Bước 2 / 3", style=discord.ButtonStyle.primary)
     async def go_step_2(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user.id != self.user_id:
             return await interaction.response.send_message("❌ Nút này chỉ dành cho người nộp đơn!", ephemeral=True)
@@ -318,10 +328,20 @@ class ApplyStep2Modal(discord.ui.Modal, title="📝 Đơn Gia Nhập Guild TNC (
             "favorite_role": self.favorite_role.value.strip(),
             "old_guild": self.old_guild.value.strip(),
         })
+        embed = discord.Embed(
+            title="📋 TIẾN ĐỘ NỘP ĐƠN (2/3)",
+            description=(
+                "**Tiến độ:** `[████████████░░░░]` **66%**\n\n"
+                "✅ **Bước 1/3:** Thông tin cá nhân *(Đã xong)*\n"
+                "✅ **Bước 2/3:** Thiết bị & Kỹ năng chơi *(Đã xong)*\n"
+                "⏳ **Bước 3/3:** Mục tiêu & Cam kết quy định *(Đang chờ)*\n\n"
+                "👇 **Chỉ còn 1 bước cuối cùng! Bấm nút bên dưới để hoàn tất nhé!**"
+            ),
+            color=discord.Color.gold()
+        )
         view = Step3LaunchView(self.cog, interaction.user.id)
         await interaction.response.send_message(
-            f"✅ **Đã hoàn thành Bước 2/3 (Thiết bị & Kỹ năng)!**\n"
-            f"👉 Nhấn vào nút bên dưới để hoàn tất **Bước 3/3 (Mục tiêu & Quy định)**.",
+            embed=embed,
             view=view,
             ephemeral=True
         )
@@ -333,7 +353,7 @@ class Step3LaunchView(discord.ui.View):
         self.cog = cog
         self.user_id = user_id
 
-    @discord.ui.button(label="Hoàn tất Bước 3 / 3", style=discord.ButtonStyle.success, emoji="📝")
+    @discord.ui.button(label="📝 Bấm vào đây để hoàn tất Bước 3 / 3", style=discord.ButtonStyle.success)
     async def go_step_3(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user.id != self.user_id:
             return await interaction.response.send_message("❌ Nút này chỉ dành cho người nộp đơn!", ephemeral=True)
@@ -487,7 +507,17 @@ class ApplyStep3Modal(discord.ui.Modal, title="📝 Đơn Gia Nhập Guild TNC (
                 await thread.send(f"🔔 {officer_mention}: Thành viên **{ign_val}** (<@{interaction.user.id}>) vừa nộp đơn gia nhập đầy đủ 12 mục! Mời Officer kiểm tra và duyệt đơn.")
             except Exception:
                 pass
-            await interaction.followup.send(f"✅ Đơn apply của bạn đã được gửi thành công! Hãy theo dõi thread tại: {thread.mention}", ephemeral=True)
+
+            finish_embed = discord.Embed(
+                title="🎉 ĐÃ NỘP ĐƠN THÀNH CÔNG (100%)",
+                description=(
+                    f"Cảm ơn **{ign_val}**! Đơn gia nhập Guild `{GUILD_NAME}` của bạn đã được gửi thành công.\n\n"
+                    f"👉 **Theo dõi bài viết nộp đơn tại:** {thread.mention}\n"
+                    f"Ban quản trị sẽ sớm kiểm tra và duyệt đơn cho bạn!"
+                ),
+                color=discord.Color.green()
+            )
+            await interaction.followup.send(embed=finish_embed, ephemeral=True)
 
 
 class ApplyLaunchView(discord.ui.View):
