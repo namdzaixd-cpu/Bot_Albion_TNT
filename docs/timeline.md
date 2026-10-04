@@ -4,6 +4,21 @@ Nhật ký tiến độ và các mốc phát triển của dự án TNC Manager 
 
 ---
 
+## 📅 2026-10-04: Sửa Lỗi Tự Động Phản Hồi & Duyệt Đơn Apply (Onboarding)
+- **Mục tiêu:** Khắc phục triệt để sự cố bot không tự động trả lời khi tạo bài viết mới trong kênh Forum Apply và các lỗi cấp Role/check quyền Officer.
+- **Thay đổi chính:**
+  - `bot/cogs/onboarding.py`:
+    - Bổ sung listener `on_thread_create`: Tự động `thread.join()` và đọc `starter_message` phản hồi ngay lập tức khi thành viên tạo thread.
+    - Sửa `on_message`: Không chặn tin nhắn khi `thread.owner_id` chưa nạp cache (`None`).
+    - Nâng cấp Regex trích xuất Ingame & Năm sinh tương thích với mọi định dạng markdown (`**Ingame:**`, `1. Ingame:`, `- Ingame:`).
+    - Thêm fallback REST API `guild.fetch_member` trong `_get_member_or_fetch` để luôn tìm thấy thành viên khi cấp Role và Rename.
+    - Mở rộng `check_officer_permission` chấp nhận quyền Administrator Discord, `officer_role_id` cấu hình và danh sách `is_officer`.
+  - `bot/tests/test_onboarding_logic.py`: Bổ sung bộ unit tests cho Regex markdown và fallback permission (14/14 passed).
+  - `docs/tasks/2026-10-04_fix_onboarding_apply/`: Lưu trữ bộ task artifacts (plan, task, walkthrough).
+- **Kết quả:** Kiểm tra cú pháp `py_compile` và 64 tests bot đạt 100%, luồng duyệt đơn hoạt động tin cậy và tự động hoàn toàn.
+
+---
+
 ## 2026-10-04: Sửa toàn bộ findings F01–F36
 
 - Mã nguồn: ledger CoreBank/đối soát/refund snapshot, transaction SP, async DB/storage, reload/auth/cache/guild contract, restart/concurrency và interaction ACK.

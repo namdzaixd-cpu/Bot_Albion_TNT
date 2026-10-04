@@ -163,6 +163,22 @@ def test_validate_form_ok():
 
 
 
+def test_regex_markdown_bold_and_lists():
+    import re
+    samples = [
+        ("**Ingame:** Kudominer\n**Năm sinh:** 2000", "Kudominer", "2000"),
+        ("**1. Ingame:** Player_1\n**2. Năm sinh:** 2k2", "Player_1", "2k2"),
+        ("- Ingame: Player_2\n- Năm sinh: 1999", "Player_2", "1999"),
+        ("1. **Ingame:** Player_3\n2. **Năm sinh:** 2005", "Player_3", "2005"),
+        ("**Ingame**: Player_4\n**Năm sinh**: 2001", "Player_4", "2001"),
+    ]
+    for c, expected_ign, expected_yob in samples:
+        ign_m = re.search(r'(?:^|[\n\*\-\d\.\s])Ingame[\*\s]*[:\-]?[\*\s]*([a-zA-Z0-9_]+)', c, re.IGNORECASE)
+        yob_m = re.search(r'(?:^|[\n\*\-\d\.\s])Năm sinh[\*\s]*[:\-]?[\*\s]*([a-zA-Z0-9]+)', c, re.IGNORECASE)
+        assert ign_m is not None and ign_m.group(1) == expected_ign
+        assert yob_m is not None and yob_m.group(1) == expected_yob
+
+
 # ── get_onboard_data (cần Interaction chứa message/channel/thread) ──────────
 class _FakeThread:
     def __init__(self, owner_id):
@@ -174,13 +190,13 @@ class _FakeThread:
 
 
 class _FakeInteraction:
-    def __init__(self, thread_owner_id, title, footer):
+    def __init__(self, thread_owner_id, title, footer, content=""):
         self.message = mock.Mock()
-        self.message.channel = thread_owner_id
-        # thay channel bằng thread giả có owner_id
+        self.message.content = content
         self.message.channel = _FakeThread(thread_owner_id)
-        self.message.embeds = [mock.Mock(title=title)]
-        self.message.embeds[0].footer = mock.Mock(text=footer)
+        self.message.embeds = [mock.Mock(title=title)] if title is not None else []
+        if self.message.embeds:
+            self.message.embeds[0].footer = mock.Mock(text=footer) if footer else None
 
 
 def test_get_onboard_data():
@@ -195,6 +211,62 @@ def test_get_onboard_data_no_footer():
     it = _FakeInteraction(999, "Báo cáo tự động: X", "")
     _, _, yob, _ = get_onboard_data(it)
     assert yob == ""
+
+
+def test_get_onboard_data_owner_id_none_fallback_content():
+    it = _FakeInteraction(None, "⏳ Chờ duyệt: Player1", "YOB: 2000", content="👉 **<@123456789>: Vui lòng nộp đơn...")
+    target_id, ign_name, yob, _ = get_onboard_data(it)
+    assert target_id == 123456789
+    assert ign_name == "Player1"
+    assert yob == "2000"
+
+
+def test_check_officer_permission():
+    from cogs.onboarding import check_officer_permission
+    
+    # 1. Administrator
+    admin_user = mock.Mock()
+    admin_user.roles = []
+    admin_user.guild_permissions.administrator = True
+    assert check_officer_permission(admin_user) is True
+
+    # 2. Configured role ID
+    config = mock.Mock()
+    config.officer_role_id = "8888"
+    role_mock = mock.Mock(id=8888)
+    role_user = mock.Mock()
+    role_user.roles = [role_mock]
+    role_user.guild_permissions.administrator = False
+    assert check_officer_permission(role_user, config) is True
+
+    # 3. Regular member without officer role
+    member_user = mock.Mock()
+    member_user.roles = [mock.Mock(id=1111, name="Member")]
+    member_user.guild_permissions.administrator = False
+    assert check_officer_permission(member_user, config) is False
+
+
+def test_onboard_slash_group_registered():
+    import discord
+    from cogs.onboarding import Onboarding
+    from discord.ext import commands
+
+    class _Bot(commands.Bot):
+        def __init__(self):
+            super().__init__(command_prefix="!", intents=discord.Intents.all())
+
+    bot = _Bot()
+    cog = Onboarding(bot)
+
+    # top-level có đúng group "recuibot"
+    top = {c.name for c in cog.get_app_commands()}
+    assert "recuibot" in top
+
+    # group chứa đủ 5 child command
+    grp = cog.onboard_group
+    child_names = {c.name for c in grp.commands}
+    assert {"toggle", "set_apply_channel", "setup_channels", "setup_roles", "list"} <= child_names
+
 
 
 

@@ -33,7 +33,10 @@ def test_legacy_snapshot_import_requires_offline_export_directory(tmp_path):
     snapshot_dir.mkdir()
     outside = tmp_path / "private.json"
     outside.write_text('{"private": true}', encoding="utf-8")
-    (snapshot_dir / "escape.json").symlink_to(outside)
+    try:
+        (snapshot_dir / "escape.json").symlink_to(outside)
+    except OSError:
+        pytest.skip("Symlinks are not permitted on this Windows environment")
     with pytest.raises(ValueError, match="regular file"):
         read_snapshot_json(snapshot_dir, "escape.json")
 

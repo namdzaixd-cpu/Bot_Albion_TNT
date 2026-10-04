@@ -36,10 +36,15 @@ if BOT_DIR not in sys.path:
 
 class _NetworkBlockedSocket(socket.socket):
     def connect(self, address):
+        if isinstance(address, tuple) and address and address[0] in ("127.0.0.1", "localhost", "::1"):
+            return super().connect(address)
         raise AssertionError("Outbound network is disabled in bot tests")
 
     def connect_ex(self, address):
+        if isinstance(address, tuple) and address and address[0] in ("127.0.0.1", "localhost", "::1"):
+            return super().connect_ex(address)
         raise AssertionError("Outbound network is disabled in bot tests")
+
 
 
 def pytest_runtest_setup(item):
