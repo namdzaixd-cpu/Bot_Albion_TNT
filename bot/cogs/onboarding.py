@@ -413,7 +413,7 @@ class ApplyStep3Modal(discord.ui.Modal, title="📝 Đơn Gia Nhập Guild TNC (
         agree_val = self.agree_rules.value.strip()
 
         api_data = await self.cog.fetch_albion_player(ign_val)
-        embed = discord.Embed(title=f"⏳ Chờ duyệt: {ign_val}", color=discord.Color.orange())
+        embed = discord.Embed(title=f"📝 Đơn nộp: {ign_val}", color=discord.Color.gold())
 
         if api_data:
             stats = api_data.get('LifetimeStatistics', {})
@@ -458,14 +458,18 @@ class ApplyStep3Modal(discord.ui.Modal, title="📝 Đơn Gia Nhập Guild TNC (
 
         thread = None
         created_message = None
+        thread_content = (
+            f"👉 **<@{interaction.user.id}>: Vui lòng nộp đơn (apply) vào guild `{GUILD_NAME}` trong game.**\n"
+            f"Sau khi nộp xong in-game, hãy bấm nút **`Đã gửi apply ingame`** bên dưới để gọi Officer vào duyệt nhé!"
+        )
         try:
             thread_name = f"📝 Apply: {ign_val}"[:100]
             if isinstance(target_channel, discord.ForumChannel):
                 thread_with_msg = await target_channel.create_thread(
                     name=thread_name,
-                    content=f"👉 **Đơn apply của <@{interaction.user.id}>** vào guild `{GUILD_NAME}`",
+                    content=thread_content,
                     embed=embed,
-                    view=OfficerApprovalView(self.cog, status="submitted")
+                    view=ApplicantConfirmView(self.cog)
                 )
                 if hasattr(thread_with_msg, "thread"):
                     thread = thread_with_msg.thread
@@ -479,9 +483,9 @@ class ApplyStep3Modal(discord.ui.Modal, title="📝 Đơn Gia Nhập Guild TNC (
                     auto_archive_duration=1440
                 )
                 created_message = await thread.send(
-                    content=f"👉 **Đơn apply của <@{interaction.user.id}>** vào guild `{GUILD_NAME}`",
+                    content=thread_content,
                     embed=embed,
-                    view=OfficerApprovalView(self.cog, status="submitted")
+                    view=ApplicantConfirmView(self.cog)
                 )
         except Exception as e:
             return await interaction.followup.send(f"❌ Lỗi khi tạo Thread nộp đơn: `{e}`", ephemeral=True)
@@ -491,9 +495,6 @@ class ApplyStep3Modal(discord.ui.Modal, title="📝 Đơn Gia Nhập Guild TNC (
             if created_message:
                 try:
                     await created_message.edit(embed=embed)
-                    self.cog.submitted_applications.add(created_message.id)
-                    self.cog.application_states[created_message.id] = "submitted"
-                    self.cog.bot.add_view(OfficerApprovalView(self.cog, status="submitted"), message_id=created_message.id)
                 except Exception:
                     pass
 
@@ -502,20 +503,16 @@ class ApplyStep3Modal(discord.ui.Modal, title="📝 Đơn Gia Nhập Guild TNC (
             except Exception:
                 pass
 
-            officer_mention = f"<@&{self.cog.config.officer_role_id}>" if self.cog.config.officer_role_id else "@Officer"
-            try:
-                await thread.send(f"🔔 {officer_mention}: Thành viên **{ign_val}** (<@{interaction.user.id}>) vừa nộp đơn gia nhập đầy đủ 12 mục! Mời Officer kiểm tra và duyệt đơn.")
-            except Exception:
-                pass
-
             finish_embed = discord.Embed(
-                title="🎉 ĐÃ NỘP ĐƠN THÀNH CÔNG (100%)",
+                title="🎉 ĐÃ HOÀN TẤT BIỂU MẪU DISCORD (100%)",
                 description=(
-                    f"Cảm ơn **{ign_val}**! Đơn gia nhập Guild `{GUILD_NAME}` của bạn đã được gửi thành công.\n\n"
-                    f"👉 **Theo dõi bài viết nộp đơn tại:** {thread.mention}\n"
-                    f"Ban quản trị sẽ sớm kiểm tra và duyệt đơn cho bạn!"
+                    f"Cảm ơn **{ign_val}**! Biểu mẫu thông tin của bạn đã được ghi nhận.\n\n"
+                    f"👉 **BƯỚC TIẾP THEO (QUAN TRỌNG):**\n"
+                    f"1️⃣ Hãy mở game **Albion Online** và nộp đơn (Apply) vào guild `{GUILD_NAME}`.\n"
+                    f"2️⃣ Vào bài viết nộp đơn tại: {thread.mention}\n"
+                    f"3️⃣ Bấm nút **`Đã gửi apply ingame`** để thông báo cho Ban quản trị duyệt đơn nhé!"
                 ),
-                color=discord.Color.green()
+                color=discord.Color.gold()
             )
             await interaction.followup.send(embed=finish_embed, ephemeral=True)
 

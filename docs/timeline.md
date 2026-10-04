@@ -4,6 +4,17 @@ Nhật ký tiến độ và các mốc phát triển của dự án TNC Manager 
 
 ---
 
+## 📅 2026-10-04: Tích Hợp Nút Xác Nhận Nộp Đơn In-Game Vào Luồng Onboarding
+- **Mục tiêu:** Yêu cầu thành viên xác nhận đã nộp đơn in-game Albion Online trước khi ping gọi Officer vào duyệt.
+- **Thay đổi chính:**
+  - `bot/cogs/onboarding.py`:
+    - `ApplyStep3Modal.on_submit`: Tạo Thread với Embed màu vàng hướng dẫn nộp đơn in-game và gắn view `ApplicantConfirmView` (nút `[Đã gửi apply ingame]`).
+    - Phản hồi Ephemeral hoàn tất 100% kèm hướng dẫn 3 bước rõ ràng: (1) Mở game Albion apply ingame, (2) Vào thread, (3) Bấm nút xác nhận.
+    - `ApplicantConfirmView.confirm`: Chỉ khi thành viên bấm nút xác nhận, bot mới chuyển sang trạng thái `⏳ Chờ duyệt`, ping `@Officer` và hiển thị bộ nút duyệt `OfficerApprovalView`.
+- **Kết quả:** Code compile sạch sẽ, 66/66 unit tests passed, luồng onboarding chặt chẽ, loại bỏ hoàn toàn tình trạng ping sớm khi chưa nộp ingame.
+
+---
+
 ## 📅 2026-10-04: Tối Ưu Giao Diện Chuyển Bước Onboarding (Embed Tiến Độ & Nút Bấm Rõ Ràng)
 - **Mục tiêu:** Tối ưu hóa trải nghiệm chuyển tiếp giữa các bước 1 ➔ 2 ➔ 3 trong quy trình nộp đơn Multi-step Modal.
 - **Thay đổi chính:**
