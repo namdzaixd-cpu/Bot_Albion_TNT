@@ -4,6 +4,18 @@ Nhật ký tiến độ và các mốc phát triển của dự án TNC Manager 
 
 ---
 
+## 📅 2026-10-04: Sửa Lỗi Nhận Diện ID Người Nộp Đơn (Tránh Bot Tự Đổi Tên & Tự Tag Mình)
+- **Mục tiêu:** Khắc phục lỗi bot tự đổi tên và tag chính mình khi Officer duyệt đơn (do `thread.owner_id` trả về ID của Bot khi Bot tự tạo Thread nộp đơn).
+- **Thay đổi chính:**
+  - `bot/cogs/onboarding.py`:
+    - `get_onboard_data`: Trích xuất `User: <id>` từ Footer hoặc Field `Người nộp` trong Embed; tự động loại trừ và chặn hoàn toàn `bot_id`.
+    - `ApplyStep3Modal` & `_process_apply_thread`: Lưu trực tiếp `User: {user.id}` vào Footer của Embed đơn nộp.
+    - `OfficerApprovalView`: Truyền `target_user_id` xuyên suốt các bước `approve`, `reject`, `rename_member` và chặn đổi tên/cấp role cho Bot.
+  - `bot/tests/test_onboarding_logic.py`: Bổ sung test case kiểm tra chống gán nhầm ID bot (66/66 tests passed).
+- **Kết quả:** Kiểm tra cú pháp và toàn bộ test suite vượt qua 100%, bảo đảm bot chỉ duyệt và đổi tên đúng thành viên nộp đơn.
+
+---
+
 ## 📅 2026-10-04: Nâng Cấp Luồng Nộp Đơn Multi-Step Modal (12 Câu Hỏi) & Lệnh `/recuibot post_panel`
 - **Mục tiêu:** Hiện đại hóa trải nghiệm nộp đơn gia nhập Guild TNC: tạo bảng thông báo có nút bấm và popup form điền 12 trường câu hỏi độc lập (chia làm 3 bước để vượt qua giới hạn 5 ô của Discord API), tự động tạo Thread và gắn bộ nút duyệt cho Officer.
 - **Thay đổi chính:**

@@ -190,31 +190,51 @@ class _FakeThread:
 
 
 class _FakeInteraction:
-    def __init__(self, thread_owner_id, title, footer, content=""):
+    def __init__(self, thread_owner_id, title, footer, content="", fields=None, bot_id=None):
         self.message = mock.Mock()
         self.message.content = content
         self.message.channel = _FakeThread(thread_owner_id)
-        self.message.embeds = [mock.Mock(title=title)] if title is not None else []
-        if self.message.embeds:
-            self.message.embeds[0].footer = mock.Mock(text=footer) if footer else None
+        embed_mock = mock.Mock(title=title) if title is not None else None
+        if embed_mock:
+            embed_mock.footer = mock.Mock(text=footer) if footer else None
+            embed_mock.fields = fields or []
+            self.message.embeds = [embed_mock]
+        else:
+            self.message.embeds = []
+        self.client = mock.Mock()
+        self.client.user.id = bot_id if bot_id is not None else 99999999
 
 
 def test_get_onboard_data():
-    it = _FakeInteraction(999, "Báo cáo tự động: TenIGN", "YOB: 2005 | qc")
+    it = _FakeInteraction(999, "Báo cáo tự động: TenIGN", "User: 12345 | YOB: 2005 | qc")
     target_id, ign_name, yob, _ = get_onboard_data(it)
     assert ign_name == "TenIGN"
     assert yob == "2005"
-    assert target_id == 999
+    assert target_id == 12345
+
+
+def test_get_onboard_data_ignores_bot_id_and_finds_real_applicant():
+    bot_id = 888888
+    # Thread owner is the bot itself (created by bot), but embed field has applicant mention
+    field_mock = mock.Mock()
+    field_mock.name = "1. Thông Tin Cơ Bản"
+    field_mock.value = "• **Người nộp:** <@55555> (Kudo)"
+    it = _FakeInteraction(bot_id, "⏳ Chờ duyệt: TenIGN", "YOB: 2000", fields=[field_mock], bot_id=bot_id)
+    target_id, ign_name, yob, _ = get_onboard_data(it)
+    assert target_id == 55555
+    assert ign_name == "TenIGN"
+    assert yob == "2000"
 
 
 def test_get_onboard_data_no_footer():
     it = _FakeInteraction(999, "Báo cáo tự động: X", "")
-    _, _, yob, _ = get_onboard_data(it)
+    target_id, _, yob, _ = get_onboard_data(it)
     assert yob == ""
+    assert target_id == 999
 
 
 def test_get_onboard_data_owner_id_none_fallback_content():
-    it = _FakeInteraction(None, "⏳ Chờ duyệt: Player1", "YOB: 2000", content="👉 **<@123456789>: Vui lòng nộp đơn...")
+    it = _FakeInteraction(None, "⏳ Chờ duyệt: Player1", "YOB: 2000", content="👉 Đơn apply của <@123456789> vào guild TNC")
     target_id, ign_name, yob, _ = get_onboard_data(it)
     assert target_id == 123456789
     assert ign_name == "Player1"

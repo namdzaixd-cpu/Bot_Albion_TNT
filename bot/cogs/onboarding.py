@@ -128,27 +128,65 @@ def is_application_report(message, thread):
 
 
 def get_onboard_data(interaction: discord.Interaction):
-    thread = interaction.message.channel
-    target_user_id = getattr(thread, "owner_id", None)
-    if not target_user_id and interaction.message.content:
-        m = re.search(r'<@!?(\d+)>', interaction.message.content)
-        if m:
-            try:
-                target_user_id = int(m.group(1))
-            except ValueError:
-                pass
+    thread = getattr(interaction.message, "channel", None) or interaction.channel
+    bot_id = interaction.client.user.id if interaction.client and interaction.client.user else None
 
-    embed = interaction.message.embeds[0] if interaction.message.embeds else None
+    target_user_id = None
+    embed = interaction.message.embeds[0] if interaction.message and interaction.message.embeds else None
     ign_name = ""
     yob = ""
+
     if embed:
         title = embed.title or ""
         ign_name = title.split(":", 1)[-1].strip()
         footer = embed.footer.text if embed.footer else ""
-        if footer and "YOB:" in footer:
+        if footer:
             for part in footer.split("|"):
-                if "YOB:" in part:
-                    yob = part.split("YOB:", 1)[1].strip()
+                part_strip = part.strip()
+                if part_strip.startswith("User:"):
+                    try:
+                        uid = int(part_strip.split("User:", 1)[1].strip())
+                        if not bot_id or uid != bot_id:
+                            target_user_id = uid
+                    except ValueError:
+                        pass
+                elif part_strip.startswith("YOB:"):
+                    yob = part_strip.split("YOB:", 1)[1].strip()
+
+        # Fallback 1: Trích xuất từ Field "Người nộp" trong Embed
+        if not target_user_id and embed.fields:
+            for field in embed.fields:
+                fname = getattr(field, "name", "")
+                fval = getattr(field, "value", "")
+                if isinstance(fname, str) and isinstance(fval, str):
+                    if "Người nộp" in fname or "Người nộp" in fval:
+                        m = re.search(r'<@!?(\d+)>', fval)
+                        if m:
+                            try:
+                                uid = int(m.group(1))
+                                if not bot_id or uid != bot_id:
+                                    target_user_id = uid
+                                    break
+                            except ValueError:
+                                pass
+
+    # Fallback 2: Trích xuất từ message.content ban đầu
+    if not target_user_id and interaction.message and interaction.message.content:
+        m = re.search(r'Đơn apply của <@!?(\d+)>', interaction.message.content)
+        if m:
+            try:
+                uid = int(m.group(1))
+                if not bot_id or uid != bot_id:
+                    target_user_id = uid
+            except ValueError:
+                pass
+
+    # Fallback 3: Thread owner (chỉ dùng nếu owner không phải là bot)
+    if not target_user_id and thread:
+        owner_id = getattr(thread, "owner_id", None)
+        if owner_id and (not bot_id or owner_id != bot_id):
+            target_user_id = owner_id
+
     return target_user_id, ign_name, yob, embed
 
 
@@ -396,7 +434,7 @@ class ApplyStep3Modal(discord.ui.Modal, title="📝 Đơn Gia Nhập Guild TNC (
             f"• **Đồng ý quy định guild:** `{agree_val}`"
         ), inline=False)
 
-        embed.set_footer(text=f"YOB: {yob_val}")
+        embed.set_footer(text=f"User: {interaction.user.id} | YOB: {yob_val}")
 
         thread = None
         created_message = None
@@ -546,12 +584,13 @@ class OfficerApprovalView(discord.ui.View):
                 if child.custom_id == "onboard_rename":
                     child.disabled = True
 
-    async def _set_message_state(self, message, embed, status, ign_name, yob, *, content, actor):
+    async def _set_message_state(self, message, embed, status, ign_name, yob, *, content, actor, target_user_id=None):
         prefix = "✅ Đã duyệt" if status == "approved" else "❌ Đã từ chối"
         if embed:
             embed.title = f"{prefix}: {ign_name}"
             embed.color = discord.Color.green() if status == "approved" else discord.Color.red()
-            footer = f"YOB: {yob} | {status.title()} bởi {actor}"
+            user_part = f"User: {target_user_id} | " if target_user_id else ""
+            footer = f"{user_part}YOB: {yob} | {status.title()} bởi {actor}"
             if message.id in self.cog.renamed_applications:
                 footer += " | Nickname đã đổi"
             embed.set_footer(text=footer)
@@ -578,6 +617,9 @@ class OfficerApprovalView(discord.ui.View):
             target_user_id, ign_name, yob, _ = get_onboard_data(interaction)
             guild = interaction.guild
             member = await _get_member_or_fetch(guild, target_user_id)
+            bot_member = guild.me if guild else None
+            if bot_member and member and member.id == bot_member.id:
+                member = None
             if member:
                 role_id = self.cog.config.member_role_id
                 role = guild.get_role(int(role_id)) if role_id and str(role_id).isdigit() else None
@@ -611,6 +653,7 @@ class OfficerApprovalView(discord.ui.View):
                     yob,
                     content=f"✅ Đơn apply của **{ign_name}** đã được duyệt bởi <@{interaction.user.id}>.",
                     actor=interaction.user.display_name,
+                    target_user_id=target_user_id,
                 )
             except Exception as error:
                 return await interaction.followup.send(f"❌ Không thể cập nhật trạng thái đơn: `{error}`", ephemeral=True)
@@ -635,9 +678,15 @@ class OfficerApprovalView(discord.ui.View):
         if not check_officer_permission(interaction.user, self.cog.config):
             return await interaction.response.send_message("❌ Xin lỗi, chỉ Officer trở lên mới được dùng!", ephemeral=True)
         target_user_id, ign_name, yob, embed = get_onboard_data(interaction)
-        member = await _get_member_or_fetch(interaction.guild, target_user_id)
+        guild = interaction.guild
+        bot_member = guild.me if guild else None
+        if bot_member and target_user_id and target_user_id == bot_member.id:
+            return await interaction.response.send_message("❌ Lỗi: Mục tiêu đổi tên là Bot!", ephemeral=True)
+        member = await _get_member_or_fetch(guild, target_user_id)
         if not member:
             return await interaction.response.send_message("❌ Không tìm thấy user này trong server (có thể họ đã out).", ephemeral=True)
+        if bot_member and member.id == bot_member.id:
+            return await interaction.response.send_message("❌ Lỗi: Mục tiêu đổi tên là Bot!", ephemeral=True)
         new_nick = f"[{GUILD_TAG}] {ign_name} {_format_yob(yob)}".strip()[:32]
         await interaction.response.defer()
         async with self.cog.application_lock(interaction.message.id):
@@ -647,7 +696,8 @@ class OfficerApprovalView(discord.ui.View):
                 await member.edit(nick=new_nick)
                 if embed:
                     footer = embed.footer.text if embed.footer else f"YOB: {yob}"
-                    embed.set_footer(text=f"{footer} | Nickname đã đổi")
+                    if "Nickname đã đổi" not in footer:
+                        embed.set_footer(text=f"{footer} | Nickname đã đổi")
                 status = self.cog.application_states.get(interaction.message.id, "submitted")
                 view = OfficerApprovalView(self.cog, status=status, renamed=True)
                 await interaction.message.edit(embed=embed, view=view)
@@ -667,7 +717,7 @@ class OfficerApprovalView(discord.ui.View):
             state = self.cog.application_states.get(message_id, "submitted")
             if state != "submitted":
                 return await interaction.followup.send("✅ Đơn này đã được xử lý.", ephemeral=True)
-            _, ign_name, yob, embed = get_onboard_data(interaction)
+            target_user_id, ign_name, yob, embed = get_onboard_data(interaction)
             try:
                 await self._set_message_state(
                     interaction.message,
@@ -677,6 +727,7 @@ class OfficerApprovalView(discord.ui.View):
                     yob,
                     content=f"❌ Đơn apply của **{ign_name}** đã bị từ chối bởi <@{interaction.user.id}>.",
                     actor=interaction.user.display_name,
+                    target_user_id=target_user_id,
                 )
             except Exception as error:
                 await interaction.followup.send(f"❌ Không thể cập nhật trạng thái đơn: `{error}`", ephemeral=True)
@@ -879,7 +930,9 @@ class Onboarding(commands.Cog):
             embed.add_field(name="Guild Hiện Tại / Cũ", value=old_guild, inline=False)
             
             if yob:
-                embed.set_footer(text=f"YOB: {yob}")
+                embed.set_footer(text=f"User: {owner_id} | YOB: {yob}")
+            else:
+                embed.set_footer(text=f"User: {owner_id}")
             
             embed.url = application_marker(thread)
             view = RulesConfirmView(self)
