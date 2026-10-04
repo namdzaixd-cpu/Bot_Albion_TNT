@@ -4,6 +4,23 @@ Nhật ký tiến độ và các mốc phát triển của dự án TNC Manager 
 
 ---
 
+## 📅 2026-10-04: Nâng Cấp Luồng Nộp Đơn Multi-Step Modal (12 Câu Hỏi) & Lệnh `/recuibot post_panel`
+- **Mục tiêu:** Hiện đại hóa trải nghiệm nộp đơn gia nhập Guild TNC: tạo bảng thông báo có nút bấm và popup form điền 12 trường câu hỏi độc lập (chia làm 3 bước để vượt qua giới hạn 5 ô của Discord API), tự động tạo Thread và gắn bộ nút duyệt cho Officer.
+- **Thay đổi chính:**
+  - `bot/cogs/onboarding.py`:
+    - Xây dựng 3 Modal: `ApplyStep1Modal` (5 câu cá nhân), `ApplyStep2Modal` (5 câu kỹ năng/thiết bị), `ApplyStep3Modal` (2 câu mục tiêu & cam kết).
+    - Xây dựng các View chuyển bước: `ApplyLaunchView`, `Step2LaunchView`, `Step3LaunchView` với state nháp `draft_applications`.
+    - Thêm lệnh slash `/recuibot post_panel` cho phép Officer tùy chỉnh tiêu đề/mô tả và gửi bảng nộp đơn vào bất kỳ kênh nào.
+    - Cho phép cấu hình kênh nộp đơn (`set_apply_channel`) hỗ trợ cả `ForumChannel` và `TextChannel`.
+    - Đăng ký persistent view cho `ApplyLaunchView` trong `cog_load()`.
+  - `bot/cogs/about.py` & `README.md`: Cập nhật lệnh `/recuibot post_panel`.
+  - `bot/tests/test_onboarding_logic.py`: Bổ sung test Multi-step Modal và lệnh `post_panel` (65/65 tests passed).
+  - `docs/features/onboarding_modal_apply.md`: Viết tài liệu đặc tả tính năng đầy đủ 12 câu hỏi.
+  - `docs/tasks/2026-10-04_onboarding_modal_apply/`: Lưu trữ bộ task artifacts (01_plan, 02_task, 03_walkthrough).
+- **Kết quả:** Kiểm tra cú pháp `py_compile` và test suite đạt 100%, quy trình nộp đơn đa bước trực quan và chuyên nghiệp.
+
+---
+
 ## 📅 2026-10-04: Sửa Lỗi Tự Động Phản Hồi & Duyệt Đơn Apply (Onboarding)
 - **Mục tiêu:** Khắc phục triệt để sự cố bot không tự động trả lời khi tạo bài viết mới trong kênh Forum Apply và các lỗi cấp Role/check quyền Officer.
 - **Thay đổi chính:**
@@ -63,14 +80,15 @@ Nhật ký tiến độ và các mốc phát triển của dự án TNC Manager 
 - Bot đang hoạt động với cấu trúc Discord.py gồm các Cogs: `about`, `alo_tts`, `blacklist`, `corebank`, `guildcheck`, `lastseen`, `massing`, `onboarding`, `siphoned`, `sync`, `update_translator`.
 - Dữ liệu lưu trữ qua Supabase (`bot/core/storage.py`).
 - Cụm tính năng AI Chat đã được tách sang repo riêng `TNC-Chatbot`.
-- Luồng Onboarding trong `bot/cogs/onboarding.py` đã được tối ưu hóa sang cơ chế In-Place Edit cực kỳ gọn gàng.
+- Luồng Onboarding trong `bot/cogs/onboarding.py` đã nâng cấp hoàn chỉnh hệ thống **Multi-Step Modal (12 câu hỏi)** kèm lệnh `/recuibot post_panel`.
+- Đã test pass toàn bộ 65 unit tests trong `bot/tests/`.
 
 ### 2. Bối cảnh & Dự định kế tiếp của user
-- User đã tối ưu xong cả 2 phần: Tra cứu thành viên In-game/Đối soát và Thu gọn luồng Onboarding.
-- Sẵn sàng tiếp tục hỗ trợ phát triển các tính năng quản lý guild, web dashboard hoặc các tiện ích khác theo yêu cầu.
+- User đã có hệ thống Panel nộp đơn + Modal Popup 3 bước với đầy đủ 12 câu hỏi chi tiết.
+- Sẵn sàng tiếp tục hỗ trợ phát triển các tính năng quản lý guild hoặc mở rộng theo yêu cầu tiếp theo.
 
 ### 3. Hướng dẫn kỹ thuật nhanh cho Agent tiếp theo
 - Khi chạy kiểm tra cú pháp: Dùng `python -m py_compile bot/cogs/*.py`.
-- **TUYỆT ĐỐI KHÔNG** khởi động bot thật ở local (`python bot/main.py`) vì bot chạy trên Render.
+- **TUYỆT ĐỐI KHÔNG** khởi động bot thật ở local (`python bot/main.py`) vì bot đang chạy 24/7 trên Render.
 - Đọc/ghi dữ liệu luôn thông qua `load_json()` / `save_json()` trong `bot/core/storage.py`.
 - Tuân thủ quy trình làm việc (bàn thiết kế -> chốt -> plan -> chốt -> code) và SBI Compliance Policy.

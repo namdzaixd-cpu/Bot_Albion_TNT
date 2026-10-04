@@ -71,6 +71,7 @@ FEATURE_FIELDS = [
     ),
     (
         "👋 Onboarding",
+        "`/recuibot post_panel` (gửi bảng nộp đơn apply kèm nút Modal — Officer)\n"
         "`/recuibot setup_channels` (tạo bộ kênh tiếp đón — Officer)\n"
         "`/recuibot set_apply_channel` (chọn kênh apply — Officer)\n"
         "`/recuibot setup_roles` (cài đặt role — Officer)\n"

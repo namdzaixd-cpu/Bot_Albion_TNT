@@ -161,6 +161,309 @@ def status_from_title(title):
         return "rejected"
     return None
 
+
+class ApplyStep1Modal(discord.ui.Modal, title="📝 Đơn Gia Nhập Guild TNC (Bước 1/3)"):
+    def __init__(self, cog: 'Onboarding'):
+        super().__init__()
+        self.cog = cog
+
+    ign = discord.ui.TextInput(
+        label="1. Tên nhân vật Albion (IGN)",
+        placeholder="Nhập chính xác tên nhân vật trong game...",
+        min_length=2,
+        max_length=30,
+        required=True,
+    )
+    yob = discord.ui.TextInput(
+        label="2. Năm sinh",
+        placeholder="Ví dụ: 2000, 2003, 1998, 2k2...",
+        min_length=2,
+        max_length=4,
+        required=True,
+    )
+    gender = discord.ui.TextInput(
+        label="3. Giới tính",
+        placeholder="Ví dụ: Nam / Nữ / Khác...",
+        max_length=20,
+        required=True,
+    )
+    country = discord.ui.TextInput(
+        label="4. Bạn đến từ quốc gia nào?",
+        placeholder="Ví dụ: Việt Nam, Nhật Bản, Hàn Quốc...",
+        max_length=50,
+        required=True,
+    )
+    source = discord.ui.TextInput(
+        label="5. Bạn biết đến guild từ đâu?",
+        placeholder="Ví dụ: Facebook, Bạn bè, Ingame, Discord...",
+        max_length=100,
+        required=True,
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
+        self.cog.draft_applications[interaction.user.id] = {
+            "ign": self.ign.value.strip(),
+            "yob": self.yob.value.strip(),
+            "gender": self.gender.value.strip(),
+            "country": self.country.value.strip(),
+            "source": self.source.value.strip(),
+        }
+        view = Step2LaunchView(self.cog, interaction.user.id)
+        await interaction.response.send_message(
+            f"✅ **Đã hoàn thành Bước 1/3 (Thông tin cá nhân)!**\n"
+            f"👉 Nhấn vào nút bên dưới để tiếp tục điền **Bước 2/3 (Thiết bị & Kỹ năng chơi)**.",
+            view=view,
+            ephemeral=True
+        )
+
+
+class Step2LaunchView(discord.ui.View):
+    def __init__(self, cog: 'Onboarding', user_id: int):
+        super().__init__(timeout=300)
+        self.cog = cog
+        self.user_id = user_id
+
+    @discord.ui.button(label="Điền tiếp Bước 2 / 3", style=discord.ButtonStyle.primary, emoji="👉")
+    async def go_step_2(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.user_id:
+            return await interaction.response.send_message("❌ Nút này chỉ dành cho người nộp đơn!", ephemeral=True)
+        if interaction.user.id not in self.cog.draft_applications:
+            return await interaction.response.send_message("⚠️ Phiên nộp đơn đã hết hạn. Vui lòng bấm nộp lại từ đầu!", ephemeral=True)
+        await interaction.response.send_modal(ApplyStep2Modal(self.cog))
+
+
+class ApplyStep2Modal(discord.ui.Modal, title="📝 Đơn Gia Nhập Guild TNC (Bước 2/3)"):
+    def __init__(self, cog: 'Onboarding'):
+        super().__init__()
+        self.cog = cog
+
+    playtime = discord.ui.TextInput(
+        label="6. Thời gian chơi game của bạn là khi nào?",
+        placeholder="Ví dụ: Tối 19h - 23h, Cuối tuần, Rảnh lúc nào chơi lúc đó...",
+        max_length=100,
+        required=True,
+    )
+    has_mic = discord.ui.TextInput(
+        label="7. Bạn có mic để giao tiếp không?",
+        placeholder="Ví dụ: Có mic nói chuyện / Chỉ nghe được...",
+        max_length=50,
+        required=True,
+    )
+    platform = discord.ui.TextInput(
+        label="8. Bạn chơi PC hay Mobile?",
+        placeholder="Ví dụ: PC / Mobile / Chơi cả 2...",
+        max_length=50,
+        required=True,
+    )
+    favorite_role = discord.ui.TextInput(
+        label="9. (Role) Vai trò yêu thích của bạn là gì?",
+        placeholder="Ví dụ: DPS / Heal / Tank / Support / Crafting...",
+        max_length=100,
+        required=True,
+    )
+    old_guild = discord.ui.TextInput(
+        label="10. Guild cũ của bạn tên gì?",
+        placeholder="Ví dụ: Tên guild cũ hoặc 'Chưa vào guild nào'...",
+        max_length=100,
+        required=True,
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
+        user_data = self.cog.draft_applications.get(interaction.user.id)
+        if not user_data:
+            return await interaction.response.send_message("⚠️ Phiên nộp đơn đã hết hạn. Vui lòng bấm nộp lại từ đầu!", ephemeral=True)
+
+        user_data.update({
+            "playtime": self.playtime.value.strip(),
+            "has_mic": self.has_mic.value.strip(),
+            "platform": self.platform.value.strip(),
+            "favorite_role": self.favorite_role.value.strip(),
+            "old_guild": self.old_guild.value.strip(),
+        })
+        view = Step3LaunchView(self.cog, interaction.user.id)
+        await interaction.response.send_message(
+            f"✅ **Đã hoàn thành Bước 2/3 (Thiết bị & Kỹ năng)!**\n"
+            f"👉 Nhấn vào nút bên dưới để hoàn tất **Bước 3/3 (Mục tiêu & Quy định)**.",
+            view=view,
+            ephemeral=True
+        )
+
+
+class Step3LaunchView(discord.ui.View):
+    def __init__(self, cog: 'Onboarding', user_id: int):
+        super().__init__(timeout=300)
+        self.cog = cog
+        self.user_id = user_id
+
+    @discord.ui.button(label="Hoàn tất Bước 3 / 3", style=discord.ButtonStyle.success, emoji="📝")
+    async def go_step_3(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.user_id:
+            return await interaction.response.send_message("❌ Nút này chỉ dành cho người nộp đơn!", ephemeral=True)
+        if interaction.user.id not in self.cog.draft_applications:
+            return await interaction.response.send_message("⚠️ Phiên nộp đơn đã hết hạn. Vui lòng bấm nộp lại từ đầu!", ephemeral=True)
+        await interaction.response.send_modal(ApplyStep3Modal(self.cog))
+
+
+class ApplyStep3Modal(discord.ui.Modal, title="📝 Đơn Gia Nhập Guild TNC (Bước 3/3)"):
+    def __init__(self, cog: 'Onboarding'):
+        super().__init__()
+        self.cog = cog
+
+    purpose = discord.ui.TextInput(
+        label="11. Bạn vào guild với mục đích gì?",
+        style=discord.TextStyle.paragraph,
+        placeholder="Mục tiêu: PvP, ZvZ, PvE, cày Fame, giao lưu học hỏi cùng anh em...",
+        max_length=400,
+        required=True,
+    )
+    agree_rules = discord.ui.TextInput(
+        label="12. Bạn đồng ý với quy định của guild không?",
+        placeholder="Ví dụ: Đồng ý 100% / Nhất trí tuân thủ quy định...",
+        max_length=100,
+        required=True,
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        guild = interaction.guild
+        if not guild:
+            return await interaction.followup.send("❌ Không tìm thấy thông tin Server.", ephemeral=True)
+
+        apply_ch_id = self.cog.config.apply_channel_id
+        if not apply_ch_id:
+            return await interaction.followup.send("⚠️ Kênh nộp đơn chưa được cài đặt. Vui lòng liên hệ Ban quản trị!", ephemeral=True)
+
+        target_channel = guild.get_channel(int(apply_ch_id)) if str(apply_ch_id).isdigit() else None
+        if not target_channel:
+            return await interaction.followup.send("⚠️ Không tìm thấy kênh nộp đơn đã cấu hình!", ephemeral=True)
+
+        user_data = self.cog.draft_applications.pop(interaction.user.id, None)
+        if not user_data:
+            return await interaction.followup.send("⚠️ Phiên nộp đơn đã hết hạn hoặc không tìm thấy dữ liệu. Vui lòng nộp lại từ đầu!", ephemeral=True)
+
+        ign_val = user_data.get("ign", "")
+        yob_val = user_data.get("yob", "")
+        gender_val = user_data.get("gender", "")
+        country_val = user_data.get("country", "")
+        source_val = user_data.get("source", "")
+        playtime_val = user_data.get("playtime", "")
+        has_mic_val = user_data.get("has_mic", "")
+        platform_val = user_data.get("platform", "")
+        role_val = user_data.get("favorite_role", "")
+        old_guild_val = user_data.get("old_guild", "")
+        purpose_val = self.purpose.value.strip()
+        agree_val = self.agree_rules.value.strip()
+
+        api_data = await self.cog.fetch_albion_player(ign_val)
+        embed = discord.Embed(title=f"⏳ Chờ duyệt: {ign_val}", color=discord.Color.orange())
+
+        if api_data:
+            stats = api_data.get('LifetimeStatistics', {})
+            pve_fame = stats.get('PvE', {}).get('Total', 0)
+            gathering_fame = stats.get('Gathering', {}).get('All', {}).get('Total', 0)
+            crafting_fame = stats.get('Crafting', {}).get('Total', 0)
+            fishing_fame = stats.get('FishingFame', 0)
+            farming_fame = stats.get('FarmingFame', 0)
+            kill_fame = api_data.get('KillFame', 0)
+            death_fame = api_data.get('DeathFame', 0)
+            total_fame = pve_fame + gathering_fame + crafting_fame + fishing_fame + farming_fame + kill_fame
+            api_guild = api_data.get('GuildName') or 'Không có'
+
+            embed.add_field(name="⚔️ Thông Số Albion (API)", value=(
+                f"• **Total Fame:** {total_fame:,}\n"
+                f"• **PvE Fame:** {pve_fame:,} | **PvP Fame:** {kill_fame:,}\n"
+                f"• **Guild hiện tại/cũ trên SBI:** `{api_guild}`"
+            ), inline=False)
+        else:
+            embed.add_field(name="⚔️ Thông Số Albion", value="⚠️ *Không tìm thấy thông tin trên SBI API (Officer vui lòng kiểm tra ingame)*", inline=False)
+
+        embed.add_field(name="👤 1. Thông Tin Cơ Bản", value=(
+            f"• **Người nộp:** <@{interaction.user.id}> ({interaction.user.display_name})\n"
+            f"• **Năm sinh:** `{yob_val}` | **Giới tính:** {gender_val}\n"
+            f"• **Quốc gia:** {country_val}\n"
+            f"• **Biết guild từ:** {source_val}"
+        ), inline=False)
+
+        embed.add_field(name="🎮 2. Kỹ Năng & Thiết Bị", value=(
+            f"• **Thời gian chơi:** {playtime_val}\n"
+            f"• **Thiết bị:** {platform_val} | **Mic:** {has_mic_val}\n"
+            f"• **Role yêu thích:** {role_val}\n"
+            f"• **Guild cũ khai báo:** {old_guild_val}"
+        ), inline=False)
+
+        embed.add_field(name="🎯 3. Mục Tiêu & Cam Kết", value=(
+            f"• **Mục đích vào guild:** {purpose_val}\n"
+            f"• **Đồng ý quy định guild:** `{agree_val}`"
+        ), inline=False)
+
+        embed.set_footer(text=f"YOB: {yob_val}")
+
+        thread = None
+        created_message = None
+        try:
+            thread_name = f"📝 Apply: {ign_val}"[:100]
+            if isinstance(target_channel, discord.ForumChannel):
+                thread_with_msg = await target_channel.create_thread(
+                    name=thread_name,
+                    content=f"👉 **Đơn apply của <@{interaction.user.id}>** vào guild `{GUILD_NAME}`",
+                    embed=embed,
+                    view=OfficerApprovalView(self.cog, status="submitted")
+                )
+                if hasattr(thread_with_msg, "thread"):
+                    thread = thread_with_msg.thread
+                    created_message = thread_with_msg.message
+                else:
+                    thread = thread_with_msg
+            elif isinstance(target_channel, discord.TextChannel):
+                thread = await target_channel.create_thread(
+                    name=thread_name,
+                    type=discord.ChannelType.public_thread,
+                    auto_archive_duration=1440
+                )
+                created_message = await thread.send(
+                    content=f"👉 **Đơn apply của <@{interaction.user.id}>** vào guild `{GUILD_NAME}`",
+                    embed=embed,
+                    view=OfficerApprovalView(self.cog, status="submitted")
+                )
+        except Exception as e:
+            return await interaction.followup.send(f"❌ Lỗi khi tạo Thread nộp đơn: `{e}`", ephemeral=True)
+
+        if thread:
+            embed.url = application_marker(thread)
+            if created_message:
+                try:
+                    await created_message.edit(embed=embed)
+                    self.cog.submitted_applications.add(created_message.id)
+                    self.cog.application_states[created_message.id] = "submitted"
+                    self.cog.bot.add_view(OfficerApprovalView(self.cog, status="submitted"), message_id=created_message.id)
+                except Exception:
+                    pass
+
+            try:
+                await thread.add_user(interaction.user)
+            except Exception:
+                pass
+
+            officer_mention = f"<@&{self.cog.config.officer_role_id}>" if self.cog.config.officer_role_id else "@Officer"
+            try:
+                await thread.send(f"🔔 {officer_mention}: Thành viên **{ign_val}** (<@{interaction.user.id}>) vừa nộp đơn gia nhập đầy đủ 12 mục! Mời Officer kiểm tra và duyệt đơn.")
+            except Exception:
+                pass
+            await interaction.followup.send(f"✅ Đơn apply của bạn đã được gửi thành công! Hãy theo dõi thread tại: {thread.mention}", ephemeral=True)
+
+
+class ApplyLaunchView(discord.ui.View):
+    def __init__(self, cog: 'Onboarding'):
+        super().__init__(timeout=None)
+        self.cog = cog
+
+    @discord.ui.button(label="Nộp Đơn Gia Nhập Guild", style=discord.ButtonStyle.success, emoji="📝", custom_id="onboard_launch_apply")
+    async def launch_apply(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not self.cog.config.is_enabled:
+            return await interaction.response.send_message("❌ Hệ thống tiếp nhận đơn apply hiện đang tạm đóng. Vui lòng thử lại sau!", ephemeral=True)
+        await interaction.response.send_modal(ApplyStep1Modal(self.cog))
+
+
 class RulesConfirmView(discord.ui.View):
     def __init__(self, cog: 'Onboarding'):
         super().__init__(timeout=None)
@@ -387,6 +690,7 @@ class Onboarding(commands.Cog):
         self.application_states = {}
         self.submitted_applications = set()
         self.renamed_applications = set()
+        self.draft_applications = {}
 
     def application_lock(self, message_id):
         return self._application_locks.setdefault(message_id, asyncio.Lock())
@@ -399,6 +703,7 @@ class Onboarding(commands.Cog):
             print(f"❌ Không thể tải cấu hình Onboarding: {error}")
             return
 
+        self.bot.add_view(ApplyLaunchView(self))
         self.bot.add_view(RulesConfirmView(self))
         self.bot.add_view(ApplicantConfirmView(self))
         forum_id = self.config.apply_channel_id
@@ -650,6 +955,7 @@ class Onboarding(commands.Cog):
         except Exception as error:
             self.config_loaded = False
             print(f"❌ Không thể tải lại cấu hình Onboarding: {error}")
+
     async def save_config_command(self, interaction, changed, success):
         if not self.config_loaded:
             return await interaction.response.send_message(
@@ -661,6 +967,7 @@ class Onboarding(commands.Cog):
         except Exception as error:
             return await interaction.followup.send(f"❌ Không thể lưu cấu hình: `{error}`", ephemeral=True)
         await interaction.edit_original_response(content=success)
+
     onboard_group = app_commands.Group(name="recuibot", description="Hệ thống Bot Thư Ký duyệt đơn")
 
     @onboard_group.command(name="toggle", description="Bật/Tắt chế độ Thư Ký tự động")
@@ -675,13 +982,13 @@ class Onboarding(commands.Cog):
             f"✅ Đã **{status}** tính năng tự động check đơn thành viên mới.",
         )
 
-    @onboard_group.command(name="set_apply_channel", description="Chỉ định kênh Forum dùng để nộp đơn")
+    @onboard_group.command(name="set_apply_channel", description="Chỉ định kênh Forum hoặc Text Channel dùng để nộp đơn")
     async def onboard_set_apply_channel(self, interaction: discord.Interaction, apply: discord.abc.GuildChannel):
         if not check_officer_permission(interaction.user, self.config):
             return await interaction.response.send_message("❌ Xin lỗi, chỉ Ban quản trị mới được quyền chỉnh!", ephemeral=True)
-        if not isinstance(apply, discord.ForumChannel):
+        if not isinstance(apply, (discord.ForumChannel, discord.TextChannel)):
             return await interaction.response.send_message(
-                "❌ Kênh Apply bắt buộc phải là một **Kênh Diễn Đàn (Forum Channel)**! Vui lòng tạo một kênh Diễn đàn mới hoặc chọn đúng kênh Diễn đàn.",
+                "❌ Kênh Apply bắt buộc phải là **Kênh Diễn Đàn (Forum)** hoặc **Kênh Văn Bản (Text Channel)**!",
                 ephemeral=True,
             )
         await self.save_config_command(
@@ -734,6 +1041,55 @@ class Onboarding(commands.Cog):
             },
             "✅ Đã lưu cấu hình Role!",
         )
+
+    @onboard_group.command(name="post_panel", description="Gửi bảng thông báo nộp đơn gia nhập Guild kèm nút bấm Modal")
+    @app_commands.describe(
+        channel="Kênh muốn gửi bảng thông báo (mặc định là kênh hiện tại)",
+        custom_title="Tiêu đề bảng thông báo (tùy chọn)",
+        custom_desc="Mô tả nội dung bảng thông báo (tùy chọn)"
+    )
+    async def onboard_post_panel(
+        self,
+        interaction: discord.Interaction,
+        channel: discord.abc.GuildChannel = None,
+        custom_title: str = None,
+        custom_desc: str = None
+    ):
+        if not check_officer_permission(interaction.user, self.config):
+            return await interaction.response.send_message("❌ Xin lỗi, chỉ Ban quản trị mới được quyền gửi bảng Apply!", ephemeral=True)
+
+        target_ch = channel or interaction.channel
+        if not isinstance(target_ch, (discord.TextChannel, discord.ForumChannel)):
+            return await interaction.response.send_message("❌ Kênh nhận phải là kênh văn bản hoặc diễn đàn!", ephemeral=True)
+
+        rules_mention = f"<#{self.config.rules_channel_id}>" if self.config.rules_channel_id else "kênh nội quy"
+        title = custom_title or f"🏰 GIA NHẬP GUILD {GUILD_NAME} [{GUILD_TAG}]"
+        desc = custom_desc or (
+            f"Chào mừng bạn đến với **{GUILD_NAME}**!\n\n"
+            f"📌 **Quy trình gia nhập:**\n"
+            f"1️⃣ Đọc kỹ các quy định chung tại {rules_mention}.\n"
+            f"2️⃣ Bấm vào nút **`📝 Nộp Đơn Gia Nhập Guild`** bên dưới.\n"
+            f"3️⃣ Điền đầy đủ thông tin vào form (IGN, Năm sinh, Thiết bị/Mic, Role...).\n"
+            f"4️⃣ Bot sẽ tự động tạo chủ đề riêng và thông báo cho Ban quản trị duyệt đơn.\n\n"
+            f"✨ *Rất vui được đồng hành cùng bạn trên chiến trường Albion!*"
+        )
+
+        embed = discord.Embed(
+            title=title,
+            description=desc,
+            color=discord.Color.gold()
+        )
+        embed.set_footer(text=f"Hệ thống tuyển thành viên {GUILD_NAME}")
+
+        view = ApplyLaunchView(self)
+        try:
+            if isinstance(target_ch, discord.TextChannel):
+                await target_ch.send(embed=embed, view=view)
+            else:
+                await target_ch.create_thread(name="📝 Hướng Dẫn & Nộp Đơn Apply", embed=embed, view=view)
+            await interaction.response.send_message(f"✅ Đã gửi bảng nộp đơn vào {target_ch.mention}!", ephemeral=True)
+        except Exception as e:
+            await interaction.response.send_message(f"❌ Không thể gửi bảng nộp đơn: `{e}`", ephemeral=True)
 
     @onboard_group.command(name="list", description="Xem cấu hình & trạng thái hệ thống Onboarding (Recuibot)")
     async def onboard_list(self, interaction: discord.Interaction):

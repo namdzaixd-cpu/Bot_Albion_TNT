@@ -24,7 +24,7 @@ web_dashboard/        Dashboard web Next.js (Discord OAuth2)
 | Hệ thống | Lệnh | Mô tả |
 |---|---|---|
 | **About** | `/aboutme` | Giới thiệu bot + link trang web (embed ngắn gọn) |
-| **Onboarding** | `/recuibot setup_channels`, `/recuibot set_apply_channel`, `/recuibot setup_roles`, `/recuibot toggle`, `/recuibot list` | Hệ thống Bot Thư Ký tiếp đón thành viên mới, duyệt đơn qua Forum, `/recuibot list` xem cấu hình & đơn chờ |
+| **Onboarding** | `/recuibot post_panel`, `/recuibot setup_channels`, `/recuibot set_apply_channel`, `/recuibot setup_roles`, `/recuibot toggle`, `/recuibot list` | Hệ thống Bot Thư Ký tiếp đón thành viên mới, gửi bảng Apply Modal 12 câu hỏi (`post_panel`), duyệt đơn qua Forum/Text channel, `/recuibot list` xem cấu hình & đơn chờ |
 | **Siphoned Points** | `/spupdate`, `/spcheck`, `/sphistory`, `/sptop`, `/splog`, `/spexport`, `/addsp`, `/removesp`, `/removesprole`, `/resetsp` | Import log `.txt` atomic, cộng dồn điểm, lịch sử và xếp hạng theo khoảng thời gian |
 | **Massing** | `/massing`, `/masstemplatelist`, `/masstemplatedelete` | Tạo party PVP/PVE theo role/weapon, UI nút bấm (join/kick/move/fill), lưu template, tự khôi phục sau restart |
 | **GuildCheck** | `/guildconfig`, `/guildcheck`, `/guildmembers`, `/guildaudit`, `/newmembers [days]` | Cấu hình guild, tra cứu thành viên in-game, hiển thị bảng phân trang thành viên guild & fame, đối soát nhân sự In-game vs Discord, `/newmembers` lọc thành viên mới vào guild qua Discord API (0đ) |

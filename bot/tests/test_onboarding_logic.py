@@ -262,10 +262,138 @@ def test_onboard_slash_group_registered():
     top = {c.name for c in cog.get_app_commands()}
     assert "recuibot" in top
 
-    # group chứa đủ 5 child command
+    # group chứa đủ 6 child command
     grp = cog.onboard_group
     child_names = {c.name for c in grp.commands}
-    assert {"toggle", "set_apply_channel", "setup_channels", "setup_roles", "list"} <= child_names
+    assert {"toggle", "set_apply_channel", "setup_channels", "setup_roles", "post_panel", "list"} <= child_names
+
+
+def test_multistep_modals_and_launch_views():
+    from cogs.onboarding import (
+        ApplyLaunchView,
+        ApplyStep1Modal,
+        ApplyStep2Modal,
+        ApplyStep3Modal,
+        Step2LaunchView,
+        Step3LaunchView,
+    )
+
+    cog = Onboarding(mock.Mock())
+    assert hasattr(cog, "draft_applications")
+    assert isinstance(cog.draft_applications, dict)
+
+    # 1. ApplyLaunchView
+    launch_view = ApplyLaunchView(cog)
+    buttons = {c.custom_id: c for c in launch_view.children}
+    assert "onboard_launch_apply" in buttons
+
+    # 2. Step 1 Modal
+    step1 = ApplyStep1Modal(cog)
+    assert len(step1.children) == 5
+    assert hasattr(step1, "ign")
+    assert hasattr(step1, "yob")
+    assert hasattr(step1, "gender")
+    assert hasattr(step1, "country")
+    assert hasattr(step1, "source")
+
+    # Simulate Step 1 submit
+    step1.ign._value = "Kudominer"
+    step1.yob._value = "2000"
+    step1.gender._value = "Nam"
+    step1.country._value = "Việt Nam"
+    step1.source._value = "Facebook"
+
+    user_id = 12345
+    it1 = mock.Mock()
+    it1.user.id = user_id
+    it1.response.send_message = mock.AsyncMock()
+
+    asyncio.run(step1.on_submit(it1))
+    assert user_id in cog.draft_applications
+    assert cog.draft_applications[user_id]["ign"] == "Kudominer"
+    assert cog.draft_applications[user_id]["yob"] == "2000"
+    it1.response.send_message.assert_awaited_once()
+
+    # 3. Step 2 Modal
+    step2_view = Step2LaunchView(cog, user_id)
+    assert step2_view.user_id == user_id
+
+    step2 = ApplyStep2Modal(cog)
+    assert len(step2.children) == 5
+    assert hasattr(step2, "playtime")
+    assert hasattr(step2, "has_mic")
+    assert hasattr(step2, "platform")
+    assert hasattr(step2, "favorite_role")
+    assert hasattr(step2, "old_guild")
+
+    # Simulate Step 2 submit
+    step2.playtime._value = "19h-23h"
+    step2.has_mic._value = "Có mic"
+    step2.platform._value = "PC"
+    step2.favorite_role._value = "DPS"
+    step2.old_guild._value = "None"
+
+    it2 = mock.Mock()
+    it2.user.id = user_id
+    it2.response.send_message = mock.AsyncMock()
+
+    asyncio.run(step2.on_submit(it2))
+    assert cog.draft_applications[user_id]["playtime"] == "19h-23h"
+    assert cog.draft_applications[user_id]["platform"] == "PC"
+    it2.response.send_message.assert_awaited_once()
+
+    # 4. Step 3 Modal
+    step3_view = Step3LaunchView(cog, user_id)
+    assert step3_view.user_id == user_id
+
+    step3 = ApplyStep3Modal(cog)
+    assert len(step3.children) == 2
+    assert hasattr(step3, "purpose")
+    assert hasattr(step3, "agree_rules")
+
+    step3.purpose._value = "ZvZ & PvP cày fame cùng ae"
+    step3.agree_rules._value = "Đồng ý 100%"
+
+    # Simulate Step 3 submit
+    cog.config.data = {"apply_channel_id": "999"}
+    target_channel = mock.Mock(spec=discord.TextChannel)
+    thread_mock = mock.Mock()
+    thread_mock.id = 777
+    thread_mock.mention = "<#777>"
+    thread_mock.add_user = mock.AsyncMock()
+    thread_mock.send = mock.AsyncMock()
+    created_msg = mock.Mock(id=888)
+    created_msg.edit = mock.AsyncMock()
+    thread_mock.send.return_value = created_msg
+    target_channel.create_thread = mock.AsyncMock(return_value=thread_mock)
+
+    guild_mock = mock.Mock(id=111)
+    guild_mock.get_channel.return_value = target_channel
+
+    it3 = mock.Mock()
+    it3.user.id = user_id
+    it3.user.display_name = "Kudo"
+    it3.guild = guild_mock
+    it3.response.defer = mock.AsyncMock()
+    it3.followup.send = mock.AsyncMock()
+
+    cog.fetch_albion_player = mock.AsyncMock(return_value={
+        "Name": "Kudominer",
+        "KillFame": 1000000,
+        "DeathFame": 50000,
+        "GuildName": "TNC",
+        "LifetimeStatistics": {
+            "PvE": {"Total": 50000000},
+            "Gathering": {"All": {"Total": 1000000}},
+            "Crafting": {"Total": 500000},
+        }
+    })
+
+    asyncio.run(step3.on_submit(it3))
+    assert user_id not in cog.draft_applications
+    target_channel.create_thread.assert_awaited_once()
+    it3.followup.send.assert_awaited()
+
 
 
 
