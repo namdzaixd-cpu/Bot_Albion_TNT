@@ -108,21 +108,37 @@ Nhật ký tiến độ và các mốc phát triển của dự án TNC Manager 
 
 ---
 
+---
+
+## 📅 2026-10-04: Nâng Cấp Hệ Thống Modal Onboarding 3 Bước & Tự Động Dọn Dẹp Ephemeral
+- **Mục tiêu:** Mở rộng biểu mẫu nộp đơn gia nhập guild thành 12 câu hỏi đầy đủ chia làm 3 bước popup Modal (33%, 66%, 100%), tự động dọn dẹp các tin nhắn trung gian và bổ sung nút xác nhận nộp đơn in-game.
+- **Thay đổi chính:**
+  - `bot/cogs/onboarding.py`:
+    - Tạo các class Modal: `ApplyStep1Modal`, `ApplyStep2Modal`, `ApplyStep3Modal` thu thập 12 trường thông tin.
+    - Tạo các class View chuyển tiếp: `Step2LaunchView`, `Step3LaunchView`.
+    - Cơ chế tự động dọn dẹp (Phương án 1): Gọi `delete_original_response()` xóa tin nhắn ephemeral của bước trước đó khi bước sau được nộp, và tự động thu hồi tin nhắn hoàn tất sau 60 giây.
+    - Tích hợp nút `[Đã gửi apply ingame]` (`ApplicantConfirmView`) để ứng viên bấm sau khi đã nộp đơn in-game, gọi Officer duyệt.
+  - `docs/tasks/2026-10-04_onboarding_ephemeral_cleanup/`: Lưu trữ tài liệu task artifacts.
+- **Kết quả:** Kiểm tra cú pháp `py_compile` và test suite `pytest bot/tests` đạt 100% pass (66 passed).
+
+---
+
 ## 📌 Mục Bàn giao Bắt buộc (Mandatory Agent Handover)
 
 ### 1. Tình trạng hiện tại của dự án
 - Bot đang hoạt động với cấu trúc Discord.py gồm các Cogs: `about`, `alo_tts`, `blacklist`, `corebank`, `guildcheck`, `lastseen`, `massing`, `onboarding`, `siphoned`, `sync`, `update_translator`.
 - Dữ liệu lưu trữ qua Supabase (`bot/core/storage.py`).
 - Cụm tính năng AI Chat đã được tách sang repo riêng `TNC-Chatbot`.
-- Luồng Onboarding trong `bot/cogs/onboarding.py` đã nâng cấp hoàn chỉnh hệ thống **Multi-Step Modal (12 câu hỏi)** kèm lệnh `/recuibot post_panel`.
-- Đã test pass toàn bộ 65 unit tests trong `bot/tests/`.
+- Luồng Onboarding trong `bot/cogs/onboarding.py` đã nâng cấp hoàn chỉnh hệ thống **Multi-Step Modal (12 câu hỏi)** kèm cơ chế tự động dọn dẹp tin nhắn ephemeral riêng tư và nút xác nhận ingame apply.
+- Đã test pass toàn bộ 66 unit tests trong `bot/tests/`.
 
 ### 2. Bối cảnh & Dự định kế tiếp của user
-- User đã có hệ thống Panel nộp đơn + Modal Popup 3 bước với đầy đủ 12 câu hỏi chi tiết.
-- Sẵn sàng tiếp tục hỗ trợ phát triển các tính năng quản lý guild hoặc mở rộng theo yêu cầu tiếp theo.
+- Quy trình Onboarding đã được tối ưu hoàn thiện từ khâu nộp đơn Modal 3 bước, tự động dọn dẹp giao diện sạch sẽ, đến khâu Officer duyệt đơn và tự động đổi nickname.
+- Sẵn sàng tiếp tục phát triển các tính năng quản lý guild hoặc mở rộng theo yêu cầu tiếp theo của user.
 
 ### 3. Hướng dẫn kỹ thuật nhanh cho Agent tiếp theo
 - Khi chạy kiểm tra cú pháp: Dùng `python -m py_compile bot/cogs/*.py`.
 - **TUYỆT ĐỐI KHÔNG** khởi động bot thật ở local (`python bot/main.py`) vì bot đang chạy 24/7 trên Render.
 - Đọc/ghi dữ liệu luôn thông qua `load_json()` / `save_json()` trong `bot/core/storage.py`.
 - Tuân thủ quy trình làm việc (bàn thiết kế -> chốt -> plan -> chốt -> code) và SBI Compliance Policy.
+

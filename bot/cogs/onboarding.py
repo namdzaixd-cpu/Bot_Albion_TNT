@@ -233,7 +233,7 @@ class ApplyStep1Modal(discord.ui.Modal, title="📝 Đơn Gia Nhập Guild TNC (
     )
     source = discord.ui.TextInput(
         label="5. Bạn biết đến guild từ đâu?",
-        placeholder="Ví dụ: Facebook, Bạn bè, Ingame, Discord...",
+        placeholder="Ví dụ: Bạn bè giới thiệu, Facebook, Discord, xem Stream...",
         max_length=100,
         required=True,
     )
@@ -245,6 +245,7 @@ class ApplyStep1Modal(discord.ui.Modal, title="📝 Đơn Gia Nhập Guild TNC (
             "gender": self.gender.value.strip(),
             "country": self.country.value.strip(),
             "source": self.source.value.strip(),
+            "last_interaction": interaction,
         }
         embed = discord.Embed(
             title="📋 TIẾN ĐỘ NỘP ĐƠN (1/3)",
@@ -321,12 +322,21 @@ class ApplyStep2Modal(discord.ui.Modal, title="📝 Đơn Gia Nhập Guild TNC (
         if not user_data:
             return await interaction.response.send_message("⚠️ Phiên nộp đơn đã hết hạn. Vui lòng bấm nộp lại từ đầu!", ephemeral=True)
 
+        # Xóa bảng thông báo Bước 1 cũ
+        last_it = user_data.get("last_interaction")
+        if last_it:
+            try:
+                await last_it.delete_original_response()
+            except Exception:
+                pass
+
         user_data.update({
             "playtime": self.playtime.value.strip(),
             "has_mic": self.has_mic.value.strip(),
             "platform": self.platform.value.strip(),
             "favorite_role": self.favorite_role.value.strip(),
             "old_guild": self.old_guild.value.strip(),
+            "last_interaction": interaction,
         })
         embed = discord.Embed(
             title="📋 TIẾN ĐỘ NỘP ĐƠN (2/3)",
@@ -398,6 +408,14 @@ class ApplyStep3Modal(discord.ui.Modal, title="📝 Đơn Gia Nhập Guild TNC (
         user_data = self.cog.draft_applications.pop(interaction.user.id, None)
         if not user_data:
             return await interaction.followup.send("⚠️ Phiên nộp đơn đã hết hạn hoặc không tìm thấy dữ liệu. Vui lòng nộp lại từ đầu!", ephemeral=True)
+
+        # Xóa bảng thông báo Bước 2 cũ
+        last_it = user_data.get("last_interaction")
+        if last_it:
+            try:
+                await last_it.delete_original_response()
+            except Exception:
+                pass
 
         ign_val = user_data.get("ign", "")
         yob_val = user_data.get("yob", "")
@@ -515,6 +533,14 @@ class ApplyStep3Modal(discord.ui.Modal, title="📝 Đơn Gia Nhập Guild TNC (
                 color=discord.Color.gold()
             )
             await interaction.followup.send(embed=finish_embed, ephemeral=True)
+
+            async def auto_cleanup(it, delay=60):
+                await asyncio.sleep(delay)
+                try:
+                    await it.delete_original_response()
+                except Exception:
+                    pass
+            asyncio.create_task(auto_cleanup(interaction))
 
 
 class ApplyLaunchView(discord.ui.View):
