@@ -28,6 +28,7 @@ FEATURE_FIELDS = [
     (
         "⚔️ Massing",
         "`/massing` (tạo party PVP/PVE)\n"
+        "`/massing_cta` (tạo nhanh party CTA 19 slot kèm guide build)\n"
         "`/masstemplatelist` (xem danh sách template)\n"
         "`/masstemplatedelete` (xóa template — Officer)",
     ),

@@ -22,7 +22,287 @@ _massing_loaded = False
 _templates_loaded = False
 # Shared across party and template whole-blob transactions, including failed-save rollback.
 _massing_state_lock = asyncio.Lock()
-role_icons = {"Tank": "🛡️", "Heal": "💚", "SP": "💜", "DPS": "⚔️"}
+role_icons = {"Tank": "🛡️", "Heal": "💚", "Healer": "💚", "SP": "💜", "Support": "💜", "DPS": "⚔️"}
+
+CTA_BUILD_GUIDES = {
+    # Tank
+    "great arcane": {
+        "weapon": "Great Arcane",
+        "armor": "Knight Armor",
+        "hood": "Assassin hood",
+        "shoes": "Royal shoes/Cleric sandals",
+        "offhand": None,
+        "cape": "Smuggle",
+        "food": "Avalonian Omelette",
+        "potion": "Gigan"
+    },
+    "heavy mace": {
+        "weapon": "Heavy Mace",
+        "armor": "Guardian Armor",
+        "hood": "Hellion hood",
+        "shoes": "Royal shoes/Cleric sandals",
+        "offhand": None,
+        "cape": "Smuggle",
+        "food": "Avalonian Omelette",
+        "potion": "Gigan"
+    },
+    "carving": {
+        "weapon": "Carving",
+        "armor": "Knight Armor",
+        "hood": "Assassin hood",
+        "shoes": "Royal shoes/Cleric sandals",
+        "offhand": None,
+        "cape": "Smuggle",
+        "food": "Beef Sandwich",
+        "potion": "Gigan"
+    },
+    "halbert": {
+        "weapon": "Halbert",
+        "armor": "Royal Armor",
+        "hood": "Hellion hood",
+        "shoes": "Royal shoes/Cleric sandals",
+        "offhand": None,
+        "cape": "Smuggle",
+        "food": "Beef Sandwich",
+        "potion": "Gigan"
+    },
+    # Support
+    "locus": {
+        "weapon": "Locus",
+        "armor": "Judicator Armor",
+        "hood": "Assassin hood",
+        "shoes": "Royal shoes",
+        "offhand": None,
+        "cape": "Smuggle",
+        "food": "Beef Sandwich",
+        "potion": "Gigan"
+    },
+    "rootbound": {
+        "weapon": "Rootbound",
+        "armor": "Judicator Armor",
+        "hood": "Assassin hood",
+        "shoes": "Royal shoes",
+        "offhand": None,
+        "cape": "Smuggle",
+        "food": "Beef Sandwich",
+        "potion": "Gigan"
+    },
+    "lifecurse": {
+        "weapon": "Lifecurse",
+        "armor": "Demon",
+        "hood": "Assassin hood",
+        "shoes": "Guardian Boots",
+        "offhand": "Taproot",
+        "cape": "Smuggle",
+        "food": "Beef Sandwich",
+        "potion": "Gigan"
+    },
+    "evensong": {
+        "weapon": "Evensong",
+        "armor": "Judicator Armor",
+        "hood": "Assassin hood",
+        "shoes": "Royal shoes/Cleric sandals",
+        "offhand": None,
+        "cape": "Smuggle",
+        "food": "Beef Sandwich",
+        "potion": "Gigan"
+    },
+    # Healer
+    "hallowfall": {
+        "weapon": "Hallowfall",
+        "armor": "Hellion Jacket",
+        "hood": "Cleric cowl",
+        "shoes": "Royal shoes",
+        "offhand": "Shield",
+        "cape": "Smuggle",
+        "food": "Avalonian Omelette",
+        "potion": "Gigan"
+    },
+    "fallen": {
+        "weapon": "Fallen",
+        "armor": "Hellion Jacket",
+        "hood": "Cleric cowl",
+        "shoes": "Royal shoes",
+        "offhand": None,
+        "cape": "Smuggle",
+        "food": "Avalonian Omelette",
+        "potion": "Gigan"
+    },
+    "blight": {
+        "weapon": "Blight",
+        "armor": "Assassin/Hellion jacket",
+        "hood": "Cleric cowl",
+        "shoes": "Royal shoes",
+        "offhand": None,
+        "cape": "Smuggle",
+        "food": "Avalonian Omelette",
+        "potion": "Gigan"
+    },
+    "rampant": {
+        "weapon": "Rampant",
+        "armor": "Assassin/Hellion jacket",
+        "hood": "Cleric cowl",
+        "shoes": "Royal shoes",
+        "offhand": None,
+        "cape": "Smuggle",
+        "food": "Avalonian Omelette",
+        "potion": "Gigan"
+    },
+    # DPS
+    "lightcaller": {
+        "weapon": "Lightcaller",
+        "armor": "Judicator Armor",
+        "hood": "Cleric cowl",
+        "shoes": "Valor Boots/Stalker shoes",
+        "offhand": None,
+        "cape": "Smuggle",
+        "food": "Beef Stew",
+        "potion": "Gigan"
+    },
+    "kingmaker": {
+        "weapon": "Kingmaker",
+        "armor": "Soldier Armor",
+        "hood": "Cleric cowl",
+        "shoes": "Valor Boots/Stalker shoes",
+        "offhand": None,
+        "cape": "Smuggle",
+        "food": "Beef Stew",
+        "potion": "Gigan"
+    },
+    "galatine": {
+        "weapon": "Galatine",
+        "armor": "Soldier Armor",
+        "hood": "Cleric cowl",
+        "shoes": "Valor Boots/Stalker shoes",
+        "offhand": None,
+        "cape": "Smuggle",
+        "food": "Beef Stew",
+        "potion": "Gigan"
+    },
+    "infinity blade": {
+        "weapon": "Infinity Blade",
+        "armor": "Hellion jacket",
+        "hood": "Cleric cowl",
+        "shoes": "Valor Boots/Stalker shoes",
+        "offhand": None,
+        "cape": "Smuggle",
+        "food": "Beef Stew",
+        "potion": "Gigan"
+    },
+    "inifinity blade": {
+        "weapon": "Infinity Blade",
+        "armor": "Hellion jacket",
+        "hood": "Cleric cowl",
+        "shoes": "Valor Boots/Stalker shoes",
+        "offhand": None,
+        "cape": "Smuggle",
+        "food": "Beef Stew",
+        "potion": "Gigan"
+    },
+    "realm/greataxe": {
+        "weapon": "Realm/Greataxe",
+        "armor": "Hellion jacket",
+        "hood": "Cleric cowl",
+        "shoes": "Valor Boots/Stalker shoes",
+        "offhand": None,
+        "cape": "Smuggle",
+        "food": "Beef Stew",
+        "potion": "Gigan"
+    },
+    "greataxe": {
+        "weapon": "Realm/Greataxe",
+        "armor": "Hellion jacket",
+        "hood": "Cleric cowl",
+        "shoes": "Valor Boots/Stalker shoes",
+        "offhand": None,
+        "cape": "Smuggle",
+        "food": "Beef Stew",
+        "potion": "Gigan"
+    },
+    "realm": {
+        "weapon": "Realm/Greataxe",
+        "armor": "Hellion jacket",
+        "hood": "Cleric cowl",
+        "shoes": "Valor Boots/Stalker shoes",
+        "offhand": None,
+        "cape": "Smuggle",
+        "food": "Beef Stew",
+        "potion": "Gigan"
+    },
+    "spike gauntlet/ursine/bracer": {
+        "weapon": "Spike Gauntlet/Ursine/Bracer",
+        "armor": "Hellion jacket/Cultist robe",
+        "hood": "Cleric cowl",
+        "shoes": "Valor Boots/Stalker shoes",
+        "offhand": None,
+        "cape": "Smuggle",
+        "food": "Beef Stew",
+        "potion": "Gigan"
+    },
+    "spike gualet/ursine/bracer": {
+        "weapon": "Spike Gauntlet/Ursine/Bracer",
+        "armor": "Hellion jacket/Cultist robe",
+        "hood": "Cleric cowl",
+        "shoes": "Valor Boots/Stalker shoes",
+        "offhand": None,
+        "cape": "Smuggle",
+        "food": "Beef Stew",
+        "potion": "Gigan"
+    },
+    "bearpaws": {
+        "weapon": "Bearpaws",
+        "armor": "Hellion jacket",
+        "hood": "Cleric cowl",
+        "shoes": "Valor Boots/Stalker shoes",
+        "offhand": None,
+        "cape": "Smuggle",
+        "food": "Beef Stew",
+        "potion": "Gigan"
+    }
+}
+
+CTA_DEFAULT_ROLES_TEXT = (
+    "Tank:Great Arcane:1,Heavy Mace:1,Carving:1,Halbert:1\n"
+    "Support:Locus:1,Rootbound:1,Lifecurse:1,Evensong:1\n"
+    "Healer:Hallowfall:1,Fallen:1,Blight:1,Rampant:1\n"
+    "DPS:Lightcaller:1,Kingmaker:1,Galatine:1,Infinity Blade:1,Realm/Greataxe:1,Spike Gauntlet/Ursine/Bracer:1,Bearpaws:1"
+)
+CTA_DEFAULT_NOTE = "Đội hình CTA ZvZ chuẩn TNC. Pick role và bấm 'Xem Build' để kiểm tra set đồ chuẩn!"
+
+
+def get_build_guide(role: str, weapon: str):
+    if not weapon:
+        return None
+    w_key = weapon.strip().lower()
+    if w_key in CTA_BUILD_GUIDES:
+        return CTA_BUILD_GUIDES[w_key]
+    for key, guide in CTA_BUILD_GUIDES.items():
+        if key in w_key or w_key in key:
+            return guide
+    return None
+
+
+def build_guide_embed(role: str, weapon: str, guide: dict) -> discord.Embed:
+    embed = discord.Embed(
+        title=f"🎒 Hướng Dẫn Build Đồ: {guide.get('weapon', weapon)}",
+        description=f"⚔️ **Vai trò:** {role} | **Đội hình CTA ZvZ Guild TNC**",
+        color=0x2ecc71
+    )
+    embed.add_field(name="⚔️ Vũ khí (Weapon)", value=f"**{guide.get('weapon', weapon)}**", inline=True)
+    embed.add_field(name="🛡️ Áo (Armor)", value=guide.get("armor", "_Không rõ_"), inline=True)
+    embed.add_field(name="🧢 Mũ (Hood)", value=guide.get("hood", "_Không rõ_"), inline=True)
+    embed.add_field(name="👞 Giày (Shoes)", value=guide.get("shoes", "_Không rõ_"), inline=True)
+    offhand = guide.get("offhand")
+    if offhand and offhand not in ("x", "❌"):
+        embed.add_field(name="🛡️ Off-Hand", value=offhand, inline=True)
+    else:
+        embed.add_field(name="🛡️ Off-Hand", value="❌ _(2 Tay / Không dùng)_", inline=True)
+    embed.add_field(name="🧥 Cape", value=guide.get("cape", "Smuggle"), inline=True)
+    embed.add_field(name="🍲 Thức ăn (Food)", value=guide.get("food", "_Không rõ_"), inline=True)
+    embed.add_field(name="🧪 Thuốc (Potion)", value=guide.get("potion", "Gigan"), inline=True)
+    embed.set_footer(text="⚔️ Guild TNC • Đội hình tác chiến CTA")
+    return embed
+
 
 async def load_massing():
     return await load_json_async(MASSING_FILE, dict)
@@ -56,8 +336,8 @@ async def save_templates(data):
 
 def validate_party_layout(party_id, roles, weapon_slots):
     slot_count = sum(len(weapon_slots.get(role, [])) for role in roles)
-    if slot_count + 10 > 25:
-        return "❌ Party vượt giới hạn 25 nút Discord. Hãy gộp hoặc giảm bớt các nhóm slot."
+    if slot_count > 25:
+        return "❌ Party vượt quá giới hạn 25 slot vũ khí/role của Discord. Hãy gộp bớt slot."
     for role in roles:
         for weapon, limit in weapon_slots.get(role, []):
             label = role if weapon == role and len(weapon_slots[role]) == 1 else f"{role}-{weapon}"
@@ -358,6 +638,81 @@ class AddMemberView(discord.ui.View):
         self.add_item(AddMemberSelect(party, parent_view))
 
 
+class PartySlotSelect(discord.ui.Select):
+    def __init__(self, party_id, party):
+        self.party_id = party_id
+        options = []
+        for role in party["roles"]:
+            icon = role_icons.get(role, "🔹")
+            for weapon, limit in party["weapon_slots"].get(role, []):
+                members = party["slots"][role].get(weapon, [])
+                filled = len(members)
+                is_full = filled >= limit
+                display = role if (len(party["weapon_slots"][role]) == 1 and party["weapon_slots"][role][0][0] == role) else f"{role} - {weapon}"
+                opt_label = f"{display} ({filled}/{limit})"
+                if is_full:
+                    opt_label += " [FULL]"
+                options.append(
+                    discord.SelectOption(
+                        label=opt_label[:100],
+                        value=f"{role}|{weapon}",
+                        emoji=icon if icon and (icon.startswith("<") or len(icon) <= 2) else None,
+                        description="Slot đã đầy" if is_full else "Bấm để nhận slot này"
+                    )
+                )
+        if not options:
+            options.append(discord.SelectOption(label="Không có slot nào", value="none"))
+        super().__init__(
+            placeholder="⚔️ Chọn Slot tham gia (Role & Vũ khí)...",
+            options=options[:25],
+            min_values=1,
+            max_values=1,
+            row=0
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        if self.values[0] == "none":
+            return await interaction.response.send_message("❌ Party không có slot hợp lệ.", ephemeral=True)
+        role, weapon = self.values[0].split("|", 1)
+        uid = interaction.user.id
+
+        def mutate(party):
+            if role not in party["weapon_slots"] or weapon not in dict(party["weapon_slots"][role]):
+                return "❌ Slot không còn tồn tại trong party."
+            current = party["slots"][role].get(weapon, [])
+            limit = dict(party["weapon_slots"][role])[weapon]
+            if uid not in current and len(current) >= limit:
+                return f"❌ Slot **{role} - {weapon}** vừa đầy!"
+            self.view._remove_member_everywhere(party, uid)
+            party["slots"][role].setdefault(weapon, []).append(uid)
+            return None
+
+        success, error = await _save_party_after_ack(interaction, self.view, mutate)
+        if not success:
+            await interaction.followup.send(error, ephemeral=True)
+            return
+
+        party = active_parties.get(self.party_id)
+        if party:
+            await interaction.edit_original_response(
+                embed=build_party_embed(party), view=self.view
+            )
+
+        guide = get_build_guide(role, weapon)
+        if guide:
+            embed = build_guide_embed(role, weapon, guide)
+            await interaction.followup.send(
+                content=f"✅ Bạn đã đăng ký thành công slot **{role} - {weapon}**!",
+                embed=embed,
+                ephemeral=True
+            )
+        else:
+            await interaction.followup.send(
+                content=f"✅ Bạn đã đăng ký thành công slot **{role} - {weapon}**!",
+                ephemeral=True
+            )
+
+
 class PartyView(discord.ui.View):
     def __init__(self, party_id):
         super().__init__(timeout=None)
@@ -385,71 +740,97 @@ class PartyView(discord.ui.View):
             return
 
         is_party_full = self._is_full(party)
-        styles = [discord.ButtonStyle.blurple, discord.ButtonStyle.green, discord.ButtonStyle.gray, discord.ButtonStyle.primary]
-        style_idx = 0
+        slot_count = sum(len(party["weapon_slots"].get(role, [])) for role in party["roles"])
 
-        for role in party["roles"]:
-            wlist = party["weapon_slots"][role]
-            is_single = len(wlist) == 1 and wlist[0][0] == role
-            for weapon, limit in wlist:
-                members = party["slots"][role].get(weapon, [])
-                filled = len(members)
-                label = f"{role} {filled}/{limit}" if is_single else f"{role}-{weapon} {filled}/{limit}"
-                btn = discord.ui.Button(
-                    label=label,
-                    style=styles[style_idx % len(styles)],
-                    custom_id=f"join_{self.party_id}_{role}_{weapon}",
-                    disabled=filled >= limit
-                )
-                btn.callback = self.make_join_callback(role, weapon)
-                self.add_item(btn)
-            style_idx += 1
+        if slot_count > 12:
+            # Dùng Dropdown Select Menu cho party nhiều slot (tránh chạm giới hạn 25 button)
+            self.add_item(PartySlotSelect(self.party_id, party))
+            row_idx = 1
+        else:
+            # Dùng Button truyền thống cho party <= 12 slot
+            styles = [discord.ButtonStyle.blurple, discord.ButtonStyle.green, discord.ButtonStyle.gray, discord.ButtonStyle.primary]
+            style_idx = 0
+            for role in party["roles"]:
+                wlist = party["weapon_slots"][role]
+                is_single = len(wlist) == 1 and wlist[0][0] == role
+                for weapon, limit in wlist:
+                    members = party["slots"][role].get(weapon, [])
+                    filled = len(members)
+                    label = f"{role} {filled}/{limit}" if is_single else f"{role}-{weapon} {filled}/{limit}"
+                    btn = discord.ui.Button(
+                        label=label,
+                        style=styles[style_idx % len(styles)],
+                        custom_id=f"join_{self.party_id}_{role}_{weapon}",
+                        disabled=filled >= limit
+                    )
+                    btn.callback = self.make_join_callback(role, weapon)
+                    self.add_item(btn)
+                style_idx += 1
+            row_idx = None
+
+        # Nút xem build trang bị
+        build_btn = discord.ui.Button(
+            label="🎒 Xem Build",
+            style=discord.ButtonStyle.success,
+            custom_id=f"build_{self.party_id}",
+            row=row_idx
+        )
+        build_btn.callback = self.view_build_callback
+        self.add_item(build_btn)
 
         if party["roles"]:
             fill_btn = discord.ui.Button(
                 label=f"🔄 Fill ({len(party.get('fills', []))})",
                 style=discord.ButtonStyle.secondary,
                 custom_id=f"fill_{self.party_id}",
-                disabled=not is_party_full
+                disabled=not is_party_full,
+                row=row_idx
             )
             fill_btn.callback = self.fill_callback
             self.add_item(fill_btn)
 
-        leave_btn = discord.ui.Button(label="❌ Leave", style=discord.ButtonStyle.red, custom_id=f"leave_{self.party_id}")
+        leave_btn = discord.ui.Button(
+            label="❌ Leave",
+            style=discord.ButtonStyle.red,
+            custom_id=f"leave_{self.party_id}",
+            row=row_idx
+        )
         leave_btn.callback = self.leave_callback
         self.add_item(leave_btn)
 
-        add_btn = discord.ui.Button(label="➕ Add", style=discord.ButtonStyle.success, custom_id=f"add_{self.party_id}")
+        admin_row = 2 if slot_count > 12 else None
+        add_btn = discord.ui.Button(label="➕ Add", style=discord.ButtonStyle.success, custom_id=f"add_{self.party_id}", row=admin_row)
         add_btn.callback = self.add_callback
         self.add_item(add_btn)
 
-        move_btn = discord.ui.Button(label="🔀 Move", style=discord.ButtonStyle.primary, custom_id=f"move_{self.party_id}")
+        move_btn = discord.ui.Button(label="🔀 Move", style=discord.ButtonStyle.primary, custom_id=f"move_{self.party_id}", row=admin_row)
         move_btn.callback = self.move_callback
         self.add_item(move_btn)
 
-        kick_btn = discord.ui.Button(label="👋 Kick", style=discord.ButtonStyle.danger, custom_id=f"kick_{self.party_id}")
+        kick_btn = discord.ui.Button(label="👋 Kick", style=discord.ButtonStyle.danger, custom_id=f"kick_{self.party_id}", row=admin_row)
         kick_btn.callback = self.kick_callback
         self.add_item(kick_btn)
 
-        note_btn = discord.ui.Button(label="📝 Note", style=discord.ButtonStyle.secondary, custom_id=f"note_{self.party_id}")
+        note_btn = discord.ui.Button(label="📝 Note", style=discord.ButtonStyle.secondary, custom_id=f"note_{self.party_id}", row=admin_row)
         note_btn.callback = self.note_callback
         self.add_item(note_btn)
 
-        del_btn = discord.ui.Button(label="🗑️ Delete", style=discord.ButtonStyle.danger, custom_id=f"delete_{self.party_id}")
-        del_btn.callback = self.delete_callback
-        self.add_item(del_btn)
+        ping_btn = discord.ui.Button(label="📢 Ping All", style=discord.ButtonStyle.secondary, custom_id=f"ping_{self.party_id}", row=admin_row)
+        ping_btn.callback = self.ping_callback
+        self.add_item(ping_btn)
 
-        copy_btn = discord.ui.Button(label="📋 Copy", style=discord.ButtonStyle.secondary, custom_id=f"copy_{self.party_id}")
+        extra_row = 3 if slot_count > 12 else None
+        copy_btn = discord.ui.Button(label="📋 Copy", style=discord.ButtonStyle.secondary, custom_id=f"copy_{self.party_id}", row=extra_row)
         copy_btn.callback = self.copy_callback
         self.add_item(copy_btn)
 
-        savetpl_btn = discord.ui.Button(label="💾 Save Template", style=discord.ButtonStyle.secondary, custom_id=f"savetpl_{self.party_id}")
+        savetpl_btn = discord.ui.Button(label="💾 Save Template", style=discord.ButtonStyle.secondary, custom_id=f"savetpl_{self.party_id}", row=extra_row)
         savetpl_btn.callback = self.save_template_callback
         self.add_item(savetpl_btn)
 
-        ping_btn = discord.ui.Button(label="📢 Ping All", style=discord.ButtonStyle.secondary, custom_id=f"ping_{self.party_id}")
-        ping_btn.callback = self.ping_callback
-        self.add_item(ping_btn)
+        del_btn = discord.ui.Button(label="🗑️ Delete", style=discord.ButtonStyle.danger, custom_id=f"delete_{self.party_id}", row=extra_row)
+        del_btn.callback = self.delete_callback
+        self.add_item(del_btn)
 
     def _is_full(self, party):
         total_filled = sum(len(m) for wmap in party["slots"].values() for m in wmap.values())
@@ -468,171 +849,6 @@ class PartyView(discord.ui.View):
             removed = True
         return removed
 
-    def make_join_callback(self, role, weapon):
-        async def callback(interaction: discord.Interaction):
-            uid = interaction.user.id
-
-            def mutate(party):
-                if role not in party["weapon_slots"] or weapon not in dict(party["weapon_slots"][role]):
-                    return "❌ Slot không còn tồn tại trong party."
-                current = party["slots"][role].get(weapon, [])
-                limit = dict(party["weapon_slots"][role])[weapon]
-                if uid not in current and len(current) >= limit:
-                    return f"❌ Slot **{role}-{weapon}** vừa đầy!"
-                self._remove_member_everywhere(party, uid)
-                party["slots"][role].setdefault(weapon, []).append(uid)
-                return None
-
-            success, error = await _save_party_after_ack(interaction, self, mutate)
-            if not success:
-                await interaction.followup.send(error, ephemeral=True)
-                return
-            await interaction.edit_original_response(
-                embed=build_party_embed(active_parties[self.party_id]), view=self
-            )
-        return callback
-
-    async def fill_callback(self, interaction: discord.Interaction):
-        uid = interaction.user.id
-
-        def mutate(party):
-            if not self._is_full(party):
-                return "⚠️ Party chưa full!"
-            if any(
-                uid in members
-                for role in party["roles"]
-                for members in party["slots"][role].values()
-            ):
-                return "⚠️ Bạn đã có slot chính thức rồi!"
-            if uid in party.get("fills", []):
-                return "⚠️ Bạn đã trong danh sách Fill rồi!"
-            party.setdefault("fills", []).append(uid)
-            return None
-
-        success, error = await _save_party_after_ack(interaction, self, mutate)
-        if not success:
-            await interaction.followup.send(error, ephemeral=True)
-            return
-        await interaction.edit_original_response(
-            embed=build_party_embed(active_parties[self.party_id]), view=self
-        )
-
-    async def leave_callback(self, interaction: discord.Interaction):
-        uid = interaction.user.id
-
-        def mutate(party):
-            if not any(
-                uid in members
-                for role in party["roles"]
-                for members in party["slots"][role].values()
-            ) and uid not in party.get("fills", []):
-                return "⚠️ Bạn chưa đăng ký party này."
-            self._remove_member_everywhere(party, uid)
-            return None
-
-        success, error = await _save_party_after_ack(interaction, self, mutate)
-        if not success:
-            await interaction.followup.send(error, ephemeral=True)
-            return
-        await interaction.edit_original_response(
-            embed=build_party_embed(active_parties[self.party_id]), view=self
-        )
-
-    async def add_callback(self, interaction: discord.Interaction):
-        party = active_parties.get(self.party_id)
-        if not party:
-            return await interaction.response.send_message("❌ Party hết hạn do bot restart.", ephemeral=True)
-        if not can_manage(party, interaction.user):
-            return await interaction.response.send_message("❌ Chỉ người tạo party hoặc Officer mới dùng được!", ephemeral=True)
-        if not party["roles"]:
-            return await interaction.response.send_message("❌ Party này không có role nào!", ephemeral=True)
-        await interaction.response.send_message("👉 Chọn thành viên cần thêm:", view=AddMemberView(party, self, interaction.guild), ephemeral=True)
-
-    async def move_callback(self, interaction: discord.Interaction):
-        party = active_parties.get(self.party_id)
-        if not party:
-            return await interaction.response.send_message("❌ Party hết hạn do bot restart.", ephemeral=True)
-        if not can_manage(party, interaction.user):
-            return await interaction.response.send_message("❌ Chỉ người tạo party hoặc Officer mới dùng được!", ephemeral=True)
-        await interaction.response.send_message("👉 Chọn thành viên muốn chuyển slot:", view=MemberPickView(party, self, "move", interaction.guild), ephemeral=True)
-
-    async def kick_callback(self, interaction: discord.Interaction):
-        party = active_parties.get(self.party_id)
-        if not party:
-            return await interaction.response.send_message("❌ Party hết hạn do bot restart.", ephemeral=True)
-        if not can_manage(party, interaction.user):
-            return await interaction.response.send_message("❌ Chỉ người tạo party hoặc Officer mới dùng được!", ephemeral=True)
-        await interaction.response.send_message("👉 Chọn thành viên muốn kick:", view=MemberPickView(party, self, "kick", interaction.guild), ephemeral=True)
-
-    async def note_callback(self, interaction: discord.Interaction):
-        party = active_parties.get(self.party_id)
-        if not party:
-            return await interaction.response.send_message("❌ Party hết hạn do bot restart.", ephemeral=True)
-        if not can_manage(party, interaction.user):
-            return await interaction.response.send_message("❌ Chỉ người tạo party hoặc Officer mới sửa được!", ephemeral=True)
-        await interaction.response.send_modal(NoteModal(self.party_id, self))
-
-    async def delete_callback(self, interaction: discord.Interaction):
-        party = active_parties.get(self.party_id)
-        if not party:
-            return await interaction.response.send_message("❌ Party hết hạn do bot restart.", ephemeral=True)
-        if not can_manage(party, interaction.user):
-            return await interaction.response.send_message("❌ Chỉ người tạo hoặc Officer mới xóa được!", ephemeral=True)
-
-        def mutate(party):
-            if not can_manage(party, interaction.user):
-                return "❌ Chỉ người tạo hoặc Officer mới xóa được!"
-            del active_parties[self.party_id]
-            return None
-
-        success, error = await _save_party_after_ack(interaction, self, mutate)
-        if not success:
-            restored = active_parties.get(self.party_id)
-            await interaction.edit_original_response(
-                content=error,
-                embed=build_party_embed(restored) if restored else None,
-                view=self if restored else None,
-            )
-            return
-        await interaction.edit_original_response(content="🗑️ **Party đã bị xóa.**", embed=None, view=None)
-
-    async def copy_callback(self, interaction: discord.Interaction):
-        party = active_parties.get(self.party_id)
-        if not party:
-            return await interaction.response.send_message("❌ Party hết hạn do bot restart.", ephemeral=True)
-        roles_text = format_role_block(party["roles"], party["weapon_slots"])
-        modal = MassingModal(
-            prefill_roles=roles_text,
-            prefill_note=party.get("note", "")
-        )
-        await interaction.response.send_modal(modal)
-
-    async def save_template_callback(self, interaction: discord.Interaction):
-        party = active_parties.get(self.party_id)
-        if not party:
-            return await interaction.response.send_message("❌ Party hết hạn do bot restart.", ephemeral=True)
-        if not can_manage(party, interaction.user):
-            return await interaction.response.send_message("❌ Chỉ người tạo party hoặc Officer mới dùng được!", ephemeral=True)
-        if not party["roles"]:
-            return await interaction.response.send_message("❌ Party này không có role nào để lưu template!", ephemeral=True)
-        await interaction.response.send_modal(SaveTemplateModal(party))
-
-    async def ping_callback(self, interaction: discord.Interaction):
-        party = active_parties.get(self.party_id)
-        if not party:
-            return await interaction.response.send_message("❌ Party hết hạn do bot restart.", ephemeral=True)
-        if not can_manage(party, interaction.user):
-            return await interaction.response.send_message("❌ Chỉ người tạo party hoặc Officer mới dùng được!", ephemeral=True)
-        member_ids = set()
-        for role in party["roles"]:
-            for weapon in party["slots"][role]:
-                member_ids.update(party["slots"][role][weapon])
-        member_ids.update(party.get("fills", []))
-        if not member_ids:
-            return await interaction.response.send_message("⚠️ Party chưa có ai để ping!", ephemeral=True)
-        await interaction.response.send_modal(PingAllModal(list(member_ids)))
-
-
 class MassingModal(discord.ui.Modal, title="⚔️ Tạo Massing"):
     party_name = discord.ui.TextInput(label="Tên Party", placeholder="Ví dụ: PVP: SMC, Bom Squad, RZ Brawl Clap...", max_length=80)
     party_time = discord.ui.TextInput(label="Thời gian (có thể để trống)", placeholder="Ví dụ: 5/6 20:00", required=False, max_length=30)
@@ -647,8 +863,12 @@ class MassingModal(discord.ui.Modal, title="⚔️ Tạo Massing"):
         style=discord.TextStyle.paragraph, required=False, max_length=300
     )
 
-    def __init__(self, prefill_roles=None, prefill_note=None):
+    def __init__(self, prefill_roles=None, prefill_note=None, prefill_name=None, prefill_time=None):
         super().__init__()
+        if prefill_name:
+            self.party_name.default = prefill_name
+        if prefill_time:
+            self.party_time.default = prefill_time
         if prefill_roles:
             self.party_roles.default = prefill_roles
         if prefill_note:
@@ -845,6 +1065,14 @@ class MassingCog(commands.Cog):
                 raise ValueError("Dữ liệu template không phải object.")
             active_templates.clear()
             active_templates.update(loaded_templates)
+            if "cta tnc" not in active_templates:
+                cta_roles, cta_wslots = parse_role_block(CTA_DEFAULT_ROLES_TEXT)
+                active_templates["cta tnc"] = {
+                    "display_name": "CTA TNC (Comp 19 Slot)",
+                    "roles": cta_roles,
+                    "weapon_slots": cta_wslots,
+                    "note": CTA_DEFAULT_NOTE
+                }
             _templates_loaded = True
         except Exception as error:
             print(f"❌ Không tải được template; thao tác ghi bị khóa: {error}")
@@ -892,6 +1120,29 @@ class MassingCog(commands.Cog):
             if current.lower() in name.lower():
                 choices.append(app_commands.Choice(name=name, value=key))
         return choices[:25]
+
+    @app_commands.command(name="massing_cta", description="Tạo nhanh party CTA 19 slot kèm guide build trang bị cho Guild TNC")
+    @app_commands.describe(
+        time="Thời gian diễn ra CTA (Ví dụ: 20:00, 5/6 19:30)",
+        note="Ghi chú thêm cho anh em (không bắt buộc)"
+    )
+    async def massing_cta_slash(self, interaction: discord.Interaction, time: str = "", note: str = ""):
+        if not _massing_loaded:
+            return await interaction.response.send_message(
+                "❌ Kho Massing chưa tải được; không thể tạo party an toàn.", ephemeral=True
+            )
+        default_note = note.strip() if note else CTA_DEFAULT_NOTE
+        modal = MassingModal(
+            prefill_roles=CTA_DEFAULT_ROLES_TEXT,
+            prefill_note=default_note,
+            prefill_name="⚔️ CTA ZvZ TNC",
+            prefill_time=time.strip()
+        )
+        try:
+            await interaction.response.send_modal(modal)
+        except discord.HTTPException as error:
+            if not interaction.response.is_done():
+                await interaction.response.send_message(f"❌ Không thể mở form Massing CTA: `{error}`", ephemeral=True)
 
     @app_commands.command(name="massing", description="Tạo party Massing (PVP/PVE/...) cho Guild TNC")
     @app_commands.describe(template="Dùng template đã lưu (không bắt buộc, để trống nếu tạo mới hoàn toàn)")

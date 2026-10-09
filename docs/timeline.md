@@ -123,17 +123,37 @@ Nhật ký tiến độ và các mốc phát triển của dự án TNC Manager 
 
 ---
 
+---
+
+## 📅 2026-10-10: Nâng Cấp Hệ Thống Massing CTA ZvZ & Hướng Dẫn Build Trang Bị
+- **Mục tiêu:** Tích hợp bộ khung đội hình CTA 19 vị trí chuẩn của Guild TNC vào hệ thống Massing, giải quyết giới hạn 25 button của Discord bằng Dropdown Select Menu, tự động gửi hướng dẫn build đồ chi tiết cho từng slot và bổ sung nút tra cứu `🎒 Xem Build`.
+- **Thay đổi chính:**
+  - `bot/cogs/massing.py`:
+    - Khai báo từ điển `CTA_BUILD_GUIDES` đầy đủ 19 slot thuộc 4 nhóm role (Tank, Support, Healer, DPS) với cấu hình chi tiết (Weapon, Armor, Hood, Shoes, Off-Hand, Cape, Food, Potion).
+    - Tạo class `PartySlotSelect` dùng `discord.ui.Select` cho các party nhiều slot (> 12 slot).
+    - Cập nhật `PartyView.rebuild_buttons` với cơ chế hybrid layout và bổ sung nút `🎒 Xem Build`.
+    - Thêm cơ chế gửi Embed build đồ dạng Ephemeral khi thành viên pick slot hoặc bấm nút xem build.
+    - Thêm slash command `/massing_cta [time] [note]` tự động điền sẵn Comp CTA 19 vị trí.
+    - Tự động khởi tạo template `CTA TNC (Comp 19 Slot)` trong `cog_load()`.
+  - `bot/cogs/about.py`: Bổ sung `/massing_cta` vào `FEATURE_FIELDS`.
+  - `README.md`: Cập nhật tài liệu lệnh và tính năng Massing.
+  - `docs/features/massing_cta_build_guide.md`: Tạo tài liệu chi tiết đặc tả tính năng.
+  - `docs/tasks/2026-10-10_massing_cta_build_guide/`: Lưu trữ bộ artifacts (plan, task, walkthrough).
+- **Kết quả:** Kiểm tra cú pháp `py_compile` pass 100%, party 19 slot hoạt động trơn tru trên Discord UI.
+
+---
+
 ## 📌 Mục Bàn giao Bắt buộc (Mandatory Agent Handover)
 
 ### 1. Tình trạng hiện tại của dự án
 - Bot đang hoạt động với cấu trúc Discord.py gồm các Cogs: `about`, `alo_tts`, `blacklist`, `corebank`, `guildcheck`, `lastseen`, `massing`, `onboarding`, `siphoned`, `sync`, `update_translator`.
 - Dữ liệu lưu trữ qua Supabase (`bot/core/storage.py`).
 - Cụm tính năng AI Chat đã được tách sang repo riêng `TNC-Chatbot`.
-- Luồng Onboarding trong `bot/cogs/onboarding.py` đã nâng cấp hoàn chỉnh hệ thống **Multi-Step Modal (12 câu hỏi)** kèm cơ chế tự động dọn dẹp tin nhắn ephemeral riêng tư và nút xác nhận ingame apply.
-- Đã test pass toàn bộ 66 unit tests trong `bot/tests/`.
+- Hệ thống Massing đã hỗ trợ hoàn hảo cả party PVP/PVE thông thường và đội hình **CTA ZvZ 19 slot** kèm **Build Guide** trang bị tự động qua lệnh `/massing_cta` và `/massing`.
+- Đã test pass toàn bộ cú pháp qua `python -m py_compile`.
 
 ### 2. Bối cảnh & Dự định kế tiếp của user
-- Quy trình Onboarding đã được tối ưu hoàn thiện từ khâu nộp đơn Modal 3 bước, tự động dọn dẹp giao diện sạch sẽ, đến khâu Officer duyệt đơn và tự động đổi nickname.
+- Hệ thống Massing CTA & Build Guide đã sẵn sàng phục vụ các buổi CTA của guild.
 - Sẵn sàng tiếp tục phát triển các tính năng quản lý guild hoặc mở rộng theo yêu cầu tiếp theo của user.
 
 ### 3. Hướng dẫn kỹ thuật nhanh cho Agent tiếp theo
@@ -141,4 +161,5 @@ Nhật ký tiến độ và các mốc phát triển của dự án TNC Manager 
 - **TUYỆT ĐỐI KHÔNG** khởi động bot thật ở local (`python bot/main.py`) vì bot đang chạy 24/7 trên Render.
 - Đọc/ghi dữ liệu luôn thông qua `load_json()` / `save_json()` trong `bot/core/storage.py`.
 - Tuân thủ quy trình làm việc (bàn thiết kế -> chốt -> plan -> chốt -> code) và SBI Compliance Policy.
+
 
