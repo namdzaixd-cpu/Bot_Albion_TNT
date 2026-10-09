@@ -37,7 +37,7 @@ Tính năng **Massing CTA** là giải pháp nâng cấp chuyên sâu cho hệ t
 ## 🛠️ 3. Lệnh và Cách Sử Dụng
 
 ### 1. Tạo nhanh party CTA: `/massing_cta [time] [note]`
-- **Mô tả:** Lệnh chuyên biệt mở sẵn Form modal với tên `⚔️ CTA ZvZ TNC`, điền sẵn toàn bộ 19 slot CTA và ghi chú hướng dẫn.
+- **Mô tả:** Lệnh tạo trực tiếp party CTA 19 vị trí vào kênh chat ngay lập tức (không cần qua popup Modal), đính kèm Embed và Dropdown chọn slot.
 - **Tham số:**
   - `time` (tùy chọn): Giờ diễn ra trận đánh (vd: `20:00`, `19:30`).
   - `note` (tùy chọn): Ghi chú riêng của Caller (nếu để trống, bot dùng ghi chú mặc định).

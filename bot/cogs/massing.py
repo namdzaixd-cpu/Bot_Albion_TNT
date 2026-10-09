@@ -1121,7 +1121,7 @@ class MassingCog(commands.Cog):
                 choices.append(app_commands.Choice(name=name, value=key))
         return choices[:25]
 
-    @app_commands.command(name="massing_cta", description="Tạo nhanh party CTA 19 slot kèm guide build trang bị cho Guild TNC")
+    @app_commands.command(name="massing_cta", description="Tạo ngay party CTA 19 slot kèm guide build trang bị cho Guild TNC")
     @app_commands.describe(
         time="Thời gian diễn ra CTA (Ví dụ: 20:00, 5/6 19:30)",
         note="Ghi chú thêm cho anh em (không bắt buộc)"
@@ -1131,18 +1131,48 @@ class MassingCog(commands.Cog):
             return await interaction.response.send_message(
                 "❌ Kho Massing chưa tải được; không thể tạo party an toàn.", ephemeral=True
             )
+        time_str = time.strip()
         default_note = note.strip() if note else CTA_DEFAULT_NOTE
-        modal = MassingModal(
-            prefill_roles=CTA_DEFAULT_ROLES_TEXT,
-            prefill_note=default_note,
-            prefill_name="⚔️ CTA ZvZ TNC",
-            prefill_time=time.strip()
-        )
-        try:
-            await interaction.response.send_modal(modal)
-        except discord.HTTPException as error:
-            if not interaction.response.is_done():
-                await interaction.response.send_message(f"❌ Không thể mở form Massing CTA: `{error}`", ephemeral=True)
+        roles, weapon_slots = parse_role_block(CTA_DEFAULT_ROLES_TEXT)
+        party_id = str(interaction.id)
+
+        party_data = {
+            "id": party_id,
+            "name": "⚔️ CTA ZvZ TNC",
+            "time": time_str,
+            "roles": roles,
+            "weapon_slots": weapon_slots,
+            "slots": {r: {} for r in roles},
+            "fills": [],
+            "note": default_note,
+            "creator": interaction.user.id,
+            "creator_name": interaction.user.display_name
+        }
+
+        await interaction.response.defer()
+        async with _massing_state_lock:
+            previous_state = deepcopy(active_parties)
+            active_parties[party_id] = party_data
+            view = PartyView(party_id)
+            try:
+                msg = await interaction.followup.send(
+                    embed=build_party_embed(party_data), view=view, wait=True
+                )
+            except Exception as error:
+                active_parties.clear()
+                active_parties.update(previous_state)
+                await interaction.followup.send(f"❌ Không thể gửi party CTA: `{error}`", ephemeral=True)
+                return
+            active_parties[str(msg.id)] = active_parties.pop(party_id)
+            active_parties[str(msg.id)]["id"] = str(msg.id)
+            view.party_id = str(msg.id)
+            view.rebuild_buttons()
+            try:
+                await save_massing(previous_state)
+            except Exception as error:
+                await msg.edit(content=f"❌ Không thể lưu party: `{error}`", embed=None, view=None)
+                return
+            await msg.edit(embed=build_party_embed(active_parties[str(msg.id)]), view=view)
 
     @app_commands.command(name="massing", description="Tạo party Massing (PVP/PVE/...) cho Guild TNC")
     @app_commands.describe(template="Dùng template đã lưu (không bắt buộc, để trống nếu tạo mới hoàn toàn)")
