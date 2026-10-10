@@ -336,8 +336,8 @@ async def save_templates(data):
 
 def validate_party_layout(party_id, roles, weapon_slots):
     slot_count = sum(len(weapon_slots.get(role, [])) for role in roles)
-    if slot_count > 25:
-        return "❌ Party vượt quá giới hạn 25 slot vũ khí/role của Discord. Hãy gộp bớt slot."
+    if slot_count + 10 > 25:
+        return "❌ Party vượt giới hạn 25 nút Discord. Hãy gộp hoặc giảm bớt các nhóm slot."
     for role in roles:
         for weapon, limit in weapon_slots.get(role, []):
             label = role if weapon == role and len(weapon_slots[role]) == 1 else f"{role}-{weapon}"
@@ -848,6 +848,215 @@ class PartyView(discord.ui.View):
             party["fills"].remove(uid)
             removed = True
         return removed
+
+    def make_join_callback(self, role, weapon):
+        async def callback(interaction: discord.Interaction):
+            uid = interaction.user.id
+
+            def mutate(party):
+                if role not in party["weapon_slots"] or weapon not in dict(party["weapon_slots"][role]):
+                    return "❌ Slot không còn tồn tại trong party."
+                current = party["slots"][role].get(weapon, [])
+                limit = dict(party["weapon_slots"][role])[weapon]
+                if uid not in current and len(current) >= limit:
+                    return f"❌ Slot **{role}-{weapon}** vừa đầy!"
+                self._remove_member_everywhere(party, uid)
+                party["slots"][role].setdefault(weapon, []).append(uid)
+                return None
+
+            success, error = await _save_party_after_ack(interaction, self, mutate)
+            if not success:
+                await interaction.followup.send(error, ephemeral=True)
+                return
+            await interaction.edit_original_response(
+                embed=build_party_embed(active_parties[self.party_id]), view=self
+            )
+            if hasattr(interaction, "followup") and hasattr(interaction.followup, "send"):
+                guide = get_build_guide(role, weapon)
+                embed = build_guide_embed(role, weapon, guide) if guide else None
+                try:
+                    res = interaction.followup.send(
+                        content=f"✅ Bạn đã đăng ký thành công slot **{role} - {weapon}**!",
+                        embed=embed,
+                        ephemeral=True
+                    )
+                    if asyncio.iscoroutine(res):
+                        await res
+                except Exception:
+                    pass
+        return callback
+
+    async def view_build_callback(self, interaction: discord.Interaction):
+        party = active_parties.get(self.party_id)
+        if not party:
+            return await interaction.response.send_message("❌ Party hết hạn do bot restart.", ephemeral=True)
+        uid = interaction.user.id
+        user_slot = None
+        for role in party["roles"]:
+            for weapon, members in party["slots"][role].items():
+                if uid in members:
+                    user_slot = (role, weapon)
+                    break
+            if user_slot:
+                break
+
+        if not user_slot:
+            return await interaction.response.send_message(
+                "⚠️ Bạn chưa nhận slot nào trong party này! Hãy chọn slot trước để xem hướng dẫn build tương ứng.",
+                ephemeral=True
+            )
+
+        role, weapon = user_slot
+        guide = get_build_guide(role, weapon)
+        if guide:
+            embed = build_guide_embed(role, weapon, guide)
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+        else:
+            await interaction.response.send_message(
+                f"ℹ️ Slot **{role} - {weapon}** hiện chưa có hướng dẫn build mẫu.",
+                ephemeral=True
+            )
+
+    async def fill_callback(self, interaction: discord.Interaction):
+        uid = interaction.user.id
+
+        def mutate(party):
+            if not self._is_full(party):
+                return "⚠️ Party chưa full!"
+            if any(
+                uid in members
+                for role in party["roles"]
+                for members in party["slots"][role].values()
+            ):
+                return "⚠️ Bạn đã có slot chính thức rồi!"
+            if uid in party.get("fills", []):
+                return "⚠️ Bạn đã trong danh sách Fill rồi!"
+            party.setdefault("fills", []).append(uid)
+            return None
+
+        success, error = await _save_party_after_ack(interaction, self, mutate)
+        if not success:
+            await interaction.followup.send(error, ephemeral=True)
+            return
+        await interaction.edit_original_response(
+            embed=build_party_embed(active_parties[self.party_id]), view=self
+        )
+
+    async def leave_callback(self, interaction: discord.Interaction):
+        uid = interaction.user.id
+
+        def mutate(party):
+            if not any(
+                uid in members
+                for role in party["roles"]
+                for members in party["slots"][role].values()
+            ) and uid not in party.get("fills", []):
+                return "⚠️ Bạn chưa đăng ký party này."
+            self._remove_member_everywhere(party, uid)
+            return None
+
+        success, error = await _save_party_after_ack(interaction, self, mutate)
+        if not success:
+            await interaction.followup.send(error, ephemeral=True)
+            return
+        await interaction.edit_original_response(
+            embed=build_party_embed(active_parties[self.party_id]), view=self
+        )
+
+    async def add_callback(self, interaction: discord.Interaction):
+        party = active_parties.get(self.party_id)
+        if not party:
+            return await interaction.response.send_message("❌ Party hết hạn do bot restart.", ephemeral=True)
+        if not can_manage(party, interaction.user):
+            return await interaction.response.send_message("❌ Chỉ người tạo party hoặc Officer mới dùng được!", ephemeral=True)
+        if not party["roles"]:
+            return await interaction.response.send_message("❌ Party này không có role nào!", ephemeral=True)
+        await interaction.response.send_message("👉 Chọn thành viên cần thêm:", view=AddMemberView(party, self, interaction.guild), ephemeral=True)
+
+    async def move_callback(self, interaction: discord.Interaction):
+        party = active_parties.get(self.party_id)
+        if not party:
+            return await interaction.response.send_message("❌ Party hết hạn do bot restart.", ephemeral=True)
+        if not can_manage(party, interaction.user):
+            return await interaction.response.send_message("❌ Chỉ người tạo party hoặc Officer mới dùng được!", ephemeral=True)
+        await interaction.response.send_message("👉 Chọn thành viên muốn chuyển slot:", view=MemberPickView(party, self, "move", interaction.guild), ephemeral=True)
+
+    async def kick_callback(self, interaction: discord.Interaction):
+        party = active_parties.get(self.party_id)
+        if not party:
+            return await interaction.response.send_message("❌ Party hết hạn do bot restart.", ephemeral=True)
+        if not can_manage(party, interaction.user):
+            return await interaction.response.send_message("❌ Chỉ người tạo party hoặc Officer mới dùng được!", ephemeral=True)
+        await interaction.response.send_message("👉 Chọn thành viên muốn kick:", view=MemberPickView(party, self, "kick", interaction.guild), ephemeral=True)
+
+    async def note_callback(self, interaction: discord.Interaction):
+        party = active_parties.get(self.party_id)
+        if not party:
+            return await interaction.response.send_message("❌ Party hết hạn do bot restart.", ephemeral=True)
+        if not can_manage(party, interaction.user):
+            return await interaction.response.send_message("❌ Chỉ người tạo party hoặc Officer mới sửa được!", ephemeral=True)
+        await interaction.response.send_modal(NoteModal(self.party_id, self))
+
+    async def delete_callback(self, interaction: discord.Interaction):
+        party = active_parties.get(self.party_id)
+        if not party:
+            return await interaction.response.send_message("❌ Party hết hạn do bot restart.", ephemeral=True)
+        if not can_manage(party, interaction.user):
+            return await interaction.response.send_message("❌ Chỉ người tạo hoặc Officer mới xóa được!", ephemeral=True)
+
+        def mutate(party):
+            if not can_manage(party, interaction.user):
+                return "❌ Chỉ người tạo hoặc Officer mới xóa được!"
+            del active_parties[self.party_id]
+            return None
+
+        success, error = await _save_party_after_ack(interaction, self, mutate)
+        if not success:
+            restored = active_parties.get(self.party_id)
+            await interaction.edit_original_response(
+                content=error,
+                embed=build_party_embed(restored) if restored else None,
+                view=self if restored else None,
+            )
+            return
+        await interaction.edit_original_response(content="🗑️ **Party đã bị xóa.**", embed=None, view=None)
+
+    async def copy_callback(self, interaction: discord.Interaction):
+        party = active_parties.get(self.party_id)
+        if not party:
+            return await interaction.response.send_message("❌ Party hết hạn do bot restart.", ephemeral=True)
+        roles_text = format_role_block(party["roles"], party["weapon_slots"])
+        modal = MassingModal(
+            prefill_roles=roles_text,
+            prefill_note=party.get("note", "")
+        )
+        await interaction.response.send_modal(modal)
+
+    async def save_template_callback(self, interaction: discord.Interaction):
+        party = active_parties.get(self.party_id)
+        if not party:
+            return await interaction.response.send_message("❌ Party hết hạn do bot restart.", ephemeral=True)
+        if not can_manage(party, interaction.user):
+            return await interaction.response.send_message("❌ Chỉ người tạo party hoặc Officer mới dùng được!", ephemeral=True)
+        if not party["roles"]:
+            return await interaction.response.send_message("❌ Party này không có role nào để lưu template!", ephemeral=True)
+        await interaction.response.send_modal(SaveTemplateModal(party))
+
+    async def ping_callback(self, interaction: discord.Interaction):
+        party = active_parties.get(self.party_id)
+        if not party:
+            return await interaction.response.send_message("❌ Party hết hạn do bot restart.", ephemeral=True)
+        if not can_manage(party, interaction.user):
+            return await interaction.response.send_message("❌ Chỉ người tạo party hoặc Officer mới dùng được!", ephemeral=True)
+        member_ids = set()
+        for role in party["roles"]:
+            for weapon in party["slots"][role]:
+                member_ids.update(party["slots"][role][weapon])
+        member_ids.update(party.get("fills", []))
+        if not member_ids:
+            return await interaction.response.send_message("⚠️ Party chưa có ai để ping!", ephemeral=True)
+        await interaction.response.send_modal(PingAllModal(list(member_ids)))
+
 
 class MassingModal(discord.ui.Modal, title="⚔️ Tạo Massing"):
     party_name = discord.ui.TextInput(label="Tên Party", placeholder="Ví dụ: PVP: SMC, Bom Squad, RZ Brawl Clap...", max_length=80)

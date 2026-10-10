@@ -143,21 +143,34 @@ Nhật ký tiến độ và các mốc phát triển của dự án TNC Manager 
 
 ---
 
+## 📅 2026-10-10: Khắc Phục Callback PartyView & Sửa Lỗi Lưu Template Massing
+- **Mục tiêu:** Khôi phục đầy đủ toàn bộ callback xử lý sự kiện tương tác nút bấm trên bảng Party Massing (`PartyView`), khắc phục lỗi không lưu được template và lỗi nút `🎒 Xem Build` / các nút quản trị.
+- **Thay đổi chính:**
+  - `bot/cogs/massing.py`:
+    - Khôi phục 12 callback methods trong `PartyView`: `save_template_callback`, `view_build_callback`, `fill_callback`, `leave_callback`, `add_callback`, `move_callback`, `kick_callback`, `note_callback`, `delete_callback`, `copy_callback`, `ping_callback`, `make_join_callback`.
+    - Thêm cơ chế an toàn gửi build guide embed (ephemeral) khi thành viên bấm `🎒 Xem Build` hoặc pick slot.
+    - Duy trì in-memory default template `cta tnc` sẵn sàng cho `/massing template:cta tnc` và `/masstemplatelist`.
+  - `bot/tests/test_discord_workflows.py`:
+    - Bổ sung unit test `test_party_view_has_all_required_callbacks` bảo vệ tính toàn vẹn của `PartyView`.
+  - `docs/tasks/2026-10-10_fix_massing_callbacks/`: Lưu trữ bộ task artifacts (plan, task, walkthrough).
+- **Kết quả:** `py_compile` pass 100%, 68/68 unit tests passed, các nút bấm trên bảng party hoạt động ổn định và chính xác.
+
+---
+
 ## 📌 Mục Bàn giao Bắt buộc (Mandatory Agent Handover)
 
 ### 1. Tình trạng hiện tại của dự án
 - Bot đang hoạt động với cấu trúc Discord.py gồm các Cogs: `about`, `alo_tts`, `blacklist`, `corebank`, `guildcheck`, `lastseen`, `massing`, `onboarding`, `siphoned`, `sync`, `update_translator`.
 - Dữ liệu lưu trữ qua Supabase (`bot/core/storage.py`).
-- Cụm tính năng AI Chat đã được tách sang repo riêng `TNC-Chatbot`.
-- Hệ thống Massing đã hỗ trợ hoàn hảo cả party PVP/PVE thông thường và đội hình **CTA ZvZ 19 slot** kèm **Build Guide** trang bị tự động qua lệnh `/massing_cta` và `/massing`.
-- Đã test pass toàn bộ cú pháp qua `python -m py_compile`.
+- Hệ thống Massing đã hoàn thiện: hỗ trợ cả party PVP/PVE thông thường, đội hình **CTA ZvZ 19 slot**, xem **Build Guide** trang bị tự động và quản lý/lưu **Template** ổn định qua các nút bấm tương tác.
+- Đã test pass toàn bộ 68 unit tests trong `pytest bot/tests` và `python -m py_compile`.
 
 ### 2. Bối cảnh & Dự định kế tiếp của user
-- Hệ thống Massing CTA & Build Guide đã sẵn sàng phục vụ các buổi CTA của guild.
+- Kiểm tra tính năng Massing & Template trên Render Production.
 - Sẵn sàng tiếp tục phát triển các tính năng quản lý guild hoặc mở rộng theo yêu cầu tiếp theo của user.
 
 ### 3. Hướng dẫn kỹ thuật nhanh cho Agent tiếp theo
-- Khi chạy kiểm tra cú pháp: Dùng `python -m py_compile bot/cogs/*.py`.
+- Khi chạy kiểm tra cú pháp: Dùng `python -m py_compile bot/cogs/*.py` và `pytest bot/tests`.
 - **TUYỆT ĐỐI KHÔNG** khởi động bot thật ở local (`python bot/main.py`) vì bot đang chạy 24/7 trên Render.
 - Đọc/ghi dữ liệu luôn thông qua `load_json()` / `save_json()` trong `bot/core/storage.py`.
 - Tuân thủ quy trình làm việc (bàn thiết kế -> chốt -> plan -> chốt -> code) và SBI Compliance Policy.

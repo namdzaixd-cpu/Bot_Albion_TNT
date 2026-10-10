@@ -567,3 +567,26 @@ def test_translator_serializes_concurrent_thread_creation_for_one_message():
         assert state["threads"]["10"] == 55
 
     asyncio.run(run())
+
+
+def test_party_view_has_all_required_callbacks():
+    party = _party()
+    party["roles"] = ["Tank"]
+    party["weapon_slots"] = {"Tank": [("Great Arcane", 1)]}
+    party["slots"] = {"Tank": {"Great Arcane": []}}
+    with mock.patch.dict(massing.active_parties, {party["id"]: party}, clear=True):
+        view = massing.PartyView(party["id"])
+        # Check all callback attributes exist
+        assert hasattr(view, "save_template_callback")
+        assert hasattr(view, "view_build_callback")
+        assert hasattr(view, "fill_callback")
+        assert hasattr(view, "leave_callback")
+        assert hasattr(view, "add_callback")
+        assert hasattr(view, "move_callback")
+        assert hasattr(view, "kick_callback")
+        assert hasattr(view, "note_callback")
+        assert hasattr(view, "delete_callback")
+        assert hasattr(view, "copy_callback")
+        assert hasattr(view, "ping_callback")
+        assert callable(view.make_join_callback("Tank", "Great Arcane"))
+
