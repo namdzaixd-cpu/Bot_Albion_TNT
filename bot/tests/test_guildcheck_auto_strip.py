@@ -243,3 +243,49 @@ def test_watcher_keeps_member_in_snapshot_when_api_error():
             mock_strip.assert_not_awaited()
             assert "p2" in saved.get("members", {})
     asyncio.run(run())
+
+
+def test_forcestrip_cmd_strips_out_guild_member():
+    async def run():
+        cog = _make_cog()
+        config = {
+            "guild_id": "g1", "region": "Asia",
+            "auto_strip_enabled": True, "log_channel_id": "", "guest_role_id": ""
+        }
+        # In-game chỉ còn p1
+        curr_raw = [{"Id": "p1", "Name": "Player1"}]
+        # Database có cả p1 và p2
+        registered = [
+            {"discord_id": "101", "player_id": "p1", "ign": "Player1"},
+            {"discord_id": "102", "player_id": "p2", "ign": "Player2"},
+        ]
+        # p2 double-check ra đã out sang guild khác
+        p2_info = {"Id": "p2", "Name": "Player2", "GuildId": "other-guild", "GuildName": "Other"}
+
+        interaction = mock.Mock()
+        interaction.user = mock.Mock()
+        interaction.user.display_name = "OfficerTest"
+        interaction.guild = mock.Mock()
+        interaction.response = mock.Mock()
+        interaction.response.defer = mock.AsyncMock()
+        interaction.followup = mock.Mock()
+        interaction.followup.send = mock.AsyncMock()
+
+        with (
+            mock.patch.object(guildcheck, "is_officer", return_value=True),
+            mock.patch.object(guildcheck, "load_guildcheck_config", new=mock.AsyncMock(return_value=config)),
+            mock.patch.object(guildcheck, "albion_get_guild_members", new=mock.AsyncMock(return_value=curr_raw)),
+            mock.patch.object(guildcheck, "registry_get_all", new=mock.AsyncMock(return_value=registered)),
+            mock.patch.object(guildcheck, "albion_get_player_by_id", new=mock.AsyncMock(return_value=p2_info)),
+            mock.patch.object(guildcheck, "save_guildcheck_snapshot", new=mock.AsyncMock()),
+            mock.patch.object(cog, "_strip_roles", new=mock.AsyncMock()) as mock_strip,
+        ):
+            await cog.forcestrip_cmd.callback(cog, interaction)
+            # p2 phải bị strip
+            mock_strip.assert_awaited_once()
+            call_args = mock_strip.call_args
+            assert call_args.args[1] == "p2"
+            assert call_args.args[2] == "Player2"
+            # Kiểm tra embed báo cáo gửi ra
+            interaction.followup.send.assert_awaited_once()
+    asyncio.run(run())

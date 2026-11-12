@@ -41,7 +41,8 @@ FEATURE_FIELDS = [
         "`/newmembers [days]` (liệt kê thành viên mới vào guild trong N ngày — dùng Discord API, 0đ)\n"
         "`/registertnc <region> <ign> [@member]` (đăng ký IGN Albion; Officer đăng ký hộ bằng @member)\n"
         "`/unregistertnc [@member]` (xóa đăng ký IGN; Officer xóa hộ bằng @member)\n"
-        "`/registerlist` (xem danh sách đăng ký IGN — Officer)",
+        "`/registerlist` (xem danh sách đăng ký IGN — Officer)\n"
+        "`/forcestrip` (quét tổng thể in-game vs Discord, tự động gỡ role người đã out — Officer)",
     ),
     (
         "🔊 Alo (TTS)",
