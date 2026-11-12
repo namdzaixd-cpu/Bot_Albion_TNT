@@ -34,11 +34,14 @@ FEATURE_FIELDS = [
     ),
     (
         "🛡️ GuildCheck",
-        "`/guildconfig` (cấu hình GuildCheck — Officer)\n"
-        "`/guildcheck` (check tay rời guild)\n"
+        "`/guildconfig` (cấu hình GuildCheck, kênh log, role khách, bật tự động gỡ role — Officer)\n"
+        "`/guildcheck` (tra cứu nhanh 1 IGN có trong guild không)\n"
         "`/guildmembers` (danh sách thành viên in-game & phân trang Fame)\n"
         "`/guildaudit` (đối soát thành viên In-game vs Discord — Officer)\n"
-        "`/newmembers [days]` (liệt kê thành viên mới vào guild trong N ngày — dùng Discord API, 0đ)",
+        "`/newmembers [days]` (liệt kê thành viên mới vào guild trong N ngày — dùng Discord API, 0đ)\n"
+        "`/registertnc <region> <ign> [@member]` (đăng ký IGN Albion; Officer đăng ký hộ bằng @member)\n"
+        "`/unregistertnc [@member]` (xóa đăng ký IGN; Officer xóa hộ bằng @member)\n"
+        "`/registerlist` (xem danh sách đăng ký IGN — Officer)",
     ),
     (
         "🔊 Alo (TTS)",

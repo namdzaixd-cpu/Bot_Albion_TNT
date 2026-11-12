@@ -5,10 +5,11 @@ from datetime import datetime, timezone, timedelta
 
 import discord
 from discord import app_commands
-from discord.ext import commands
+from discord.ext import commands, tasks
 import aiohttp
 
-from core.config import STORAGE_DIR
+from core.config import GUILD_ID, STORAGE_DIR
+from core.db import async_execute
 from core.permissions import is_officer
 from core.storage import load_json_async, save_json_async
 
@@ -16,13 +17,27 @@ from core.storage import load_json_async, save_json_async
 # HỆ THỐNG GUILDCHECK & QUẢN LÝ THÀNH VIÊN IN-GAME
 # ==============================================================================
 GUILDCHECK_CONFIG_FILE = os.path.join(STORAGE_DIR, "tnc_guildcheck_v1.json")
+GUILDCHECK_SNAPSHOT_FILE = os.path.join(STORAGE_DIR, "tnc_guildcheck_snapshot_v1.json")
 REGION_API_BASE = {
     "Americas": "https://gameinfo.albiononline.com/api/gameinfo",
     "Asia": "https://gameinfo-sgp.albiononline.com/api/gameinfo",
     "Europe": "https://gameinfo-ams.albiononline.com/api/gameinfo",
 }
 
-GUILDCHECK_CONFIG_DEFAULT = lambda: {"guild_id": "", "region": "Asia"}
+GUILDCHECK_CONFIG_DEFAULT = lambda: {
+    "guild_id": "",
+    "region": "Asia",
+    "auto_strip_enabled": False,
+    "log_channel_id": "",
+    "guest_role_id": "",
+}
+GUILDCHECK_SNAPSHOT_DEFAULT = lambda: {
+    "guild_id": "",
+    "region": "Asia",
+    "updated_at": "",
+    "members": {},
+}
+
 
 async def load_guildcheck_config():
     return await load_json_async(GUILDCHECK_CONFIG_FILE, GUILDCHECK_CONFIG_DEFAULT)
@@ -30,6 +45,15 @@ async def load_guildcheck_config():
 
 async def save_guildcheck_config(data):
     return await save_json_async(data, GUILDCHECK_CONFIG_FILE)
+
+
+async def load_guildcheck_snapshot():
+    return await load_json_async(GUILDCHECK_SNAPSHOT_FILE, GUILDCHECK_SNAPSHOT_DEFAULT)
+
+
+async def save_guildcheck_snapshot(data):
+    return await save_json_async(data, GUILDCHECK_SNAPSHOT_FILE)
+
 
 def format_fame(val):
     """Định dạng Fame số lớn (K, M, B) cho dễ đọc."""
@@ -44,6 +68,7 @@ def format_fame(val):
         return f"{int(val)}"
     except Exception:
         return "0"
+
 
 async def albion_search_player(region, name):
     """Tìm player khớp TÊN TUYỆT ĐỐI trên đúng region. Trả None nếu không thấy."""
@@ -66,6 +91,7 @@ async def albion_search_player(region, name):
             return p
     return None
 
+
 async def albion_get_guild_members(region, guild_id):
     """Lấy danh sách toàn bộ thành viên trong Guild từ API SBI."""
     base = REGION_API_BASE.get(region)
@@ -85,6 +111,7 @@ async def albion_get_guild_members(region, guild_id):
         print(f"[albion_get_guild_members] Lỗi: {e}")
         return None
 
+
 async def albion_get_guild_info(region, guild_id):
     """Lấy thông tin tổng quan của Guild từ API SBI."""
     base = REGION_API_BASE.get(region)
@@ -100,6 +127,72 @@ async def albion_get_guild_info(region, guild_id):
     except Exception as e:
         print(f"[albion_get_guild_info] Lỗi: {e}")
         return None
+
+
+async def albion_get_player_by_id(region, player_id):
+    """Lấy thông tin chi tiết 1 player theo player_id để double-check GuildId."""
+    base = REGION_API_BASE.get(region)
+    if not base or not player_id:
+        return None
+    url = f"{base}/players/{player_id}"
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as r:
+                if r.status != 200:
+                    return None
+                return await r.json()
+    except Exception as e:
+        print(f"[albion_get_player_by_id] Lỗi: {e}")
+        return None
+
+
+# ==============================================================================
+# REGISTRY HELPERS — đọc/ghi bảng member_registry trên Supabase
+# ==============================================================================
+
+async def registry_get(discord_id: str):
+    """Lấy bản ghi registry của 1 user Discord. Trả None nếu chưa có."""
+    row, err = await async_execute(
+        lambda c: c.table("member_registry").select("*").eq("discord_id", str(discord_id)).maybe_single()
+    )
+    if err:
+        return None
+    return row.data if row and hasattr(row, "data") else None
+
+
+async def registry_upsert(discord_id: str, player_id: str, ign: str, region: str, registered_by: str = None):
+    """Lưu hoặc cập nhật registry entry."""
+    now = datetime.now(timezone.utc).isoformat()
+    row = {
+        "discord_id": str(discord_id),
+        "player_id": str(player_id),
+        "ign": ign,
+        "region": region,
+        "registered_by": str(registered_by) if registered_by else None,
+        "updated_at": now,
+    }
+    _, err = await async_execute(
+        lambda c: c.table("member_registry").upsert(row, on_conflict="discord_id")
+    )
+    return err
+
+
+async def registry_delete(discord_id: str):
+    """Xóa registry entry của 1 user Discord."""
+    _, err = await async_execute(
+        lambda c: c.table("member_registry").delete().eq("discord_id", str(discord_id))
+    )
+    return err
+
+
+async def registry_get_all():
+    """Lấy toàn bộ danh sách registry. Trả list (có thể rỗng)."""
+    rows, err = await async_execute(
+        lambda c: c.table("member_registry").select("*").order("ign")
+    )
+    if err or rows is None:
+        return []
+    return rows.data if hasattr(rows, "data") else []
 
 
 # ==============================================================================
@@ -203,22 +296,282 @@ class GuildCheckCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self._config_lock = asyncio.Lock()
+        self._watch_lock = asyncio.Lock()
 
-    @app_commands.command(name="guildconfig", description="Cấu hình Guild ID và Khu vực cho máy chủ (Officer only)")
+    async def cog_load(self):
+        self.guild_leave_watcher.start()
+
+    def cog_unload(self):
+        self.guild_leave_watcher.cancel()
+
+    # --------------------------------------------------------------------------
+    # TASK NỀN: Phát hiện thành viên out guild & tự động gỡ role
+    # --------------------------------------------------------------------------
+    @tasks.loop(minutes=5)
+    async def guild_leave_watcher(self):
+        if self._watch_lock.locked():
+            return
+        async with self._watch_lock:
+            await self._run_leave_watcher()
+
+    @guild_leave_watcher.before_loop
+    async def before_guild_leave_watcher(self):
+        await self.bot.wait_until_ready()
+
+    async def _run_leave_watcher(self):
+        try:
+            config = await load_guildcheck_config()
+        except Exception as e:
+            print(f"[guild_leave_watcher] Lỗi đọc config: {e}")
+            return
+
+        if not config.get("auto_strip_enabled"):
+            return
+        guild_id_albion = config.get("guild_id", "").strip()
+        region = config.get("region", "Asia")
+        log_channel_id = config.get("log_channel_id", "")
+        guest_role_id = config.get("guest_role_id", "")
+        if not guild_id_albion:
+            return
+
+        discord_guild = self.bot.get_guild(int(GUILD_ID))
+        if not discord_guild:
+            return
+
+        # 1. Lấy danh sách thành viên từ Albion API
+        members_raw = await albion_get_guild_members(region, guild_id_albion)
+        if members_raw is None:
+            print("[guild_leave_watcher] API Albion lỗi, bỏ qua chu kỳ này.")
+            return
+
+        curr_members = {
+            m["Id"]: m["Name"]
+            for m in members_raw
+            if m.get("Id") and m.get("Name")
+        }
+
+        # 2. Load snapshot cũ
+        try:
+            snapshot = await load_guildcheck_snapshot()
+        except Exception as e:
+            print(f"[guild_leave_watcher] Lỗi đọc snapshot: {e}")
+            return
+
+        prev_members = snapshot.get("members", {})
+        snap_guild_id = snapshot.get("guild_id", "")
+        snap_region = snapshot.get("region", "")
+
+        # Lần đầu hoặc đổi guild/region → chỉ lưu baseline, không gỡ role
+        if not prev_members or snap_guild_id != guild_id_albion or snap_region != region:
+            new_snap = {
+                "guild_id": guild_id_albion,
+                "region": region,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+                "members": curr_members,
+            }
+            try:
+                await save_guildcheck_snapshot(new_snap)
+            except Exception as e:
+                print(f"[guild_leave_watcher] Lỗi lưu baseline snapshot: {e}")
+            return
+
+        # 3. Tìm missing player_id
+        missing_ids = set(prev_members.keys()) - set(curr_members.keys())
+        if not missing_ids:
+            # Cập nhật snapshot nếu có người mới vào (ngược lại không gỡ ai)
+            new_snap = {
+                "guild_id": guild_id_albion,
+                "region": region,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+                "members": curr_members,
+            }
+            try:
+                await save_guildcheck_snapshot(new_snap)
+            except Exception as e:
+                print(f"[guild_leave_watcher] Lỗi lưu snapshot: {e}")
+            return
+
+        # 4. Circuit breaker: API trả thiếu hàng loạt → không gỡ role
+        if len(prev_members) >= 10:
+            threshold = max(15, int(len(prev_members) * 0.3))
+            if len(missing_ids) >= threshold:
+                print(f"[guild_leave_watcher] ⚠️ Circuit breaker: {len(missing_ids)} người biến mất cùng lúc, nghi API lag.")
+                await self._send_log(discord_guild, log_channel_id, discord.Embed(
+                    title="⚠️ Cảnh báo: Bot tạm dừng tự động gỡ role",
+                    description=(
+                        f"Phát hiện **{len(missing_ids)}** thành viên biến mất khỏi danh sách guild cùng lúc "
+                        f"(ngưỡng an toàn: {threshold}).\n"
+                        "Có thể API Albion đang trả thiếu dữ liệu. Bot **không gỡ role** lần này.\n"
+                        "Nếu đây là thật, dùng `/guildaudit` để kiểm tra thủ công."
+                    ),
+                    color=0xe74c3c
+                ))
+                return
+
+        # 5. Double-check từng player và gỡ role nếu xác nhận out guild
+        next_members = dict(curr_members)  # sẽ bổ sung những người cần giữ lại
+
+        for player_id in missing_ids:
+            await asyncio.sleep(0.5)  # tránh spam API
+            ign = prev_members.get(player_id, player_id)
+
+            # Double-check qua API cá nhân
+            player_info = await albion_get_player_by_id(region, player_id)
+            if player_info is None:
+                # API lỗi tạm thời → giữ lại trong snapshot, kiểm tra chu kỳ sau
+                next_members[player_id] = ign
+                print(f"[guild_leave_watcher] API lỗi khi check {ign}, giữ lại snapshot.")
+                continue
+
+            if player_info.get("GuildId") == guild_id_albion:
+                # Vẫn còn trong guild (API danh sách bị cache thiếu) → giữ lại
+                next_members[player_id] = ign
+                continue
+
+            # Xác nhận đã out guild → xử lý Discord
+            current_guild_name = player_info.get("GuildName") or "Không có guild"
+            await self._strip_roles(discord_guild, player_id, ign, current_guild_name, guest_role_id, log_channel_id)
+
+        # 6. Lưu snapshot đã cập nhật
+        new_snap = {
+            "guild_id": guild_id_albion,
+            "region": region,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "members": next_members,
+        }
+        try:
+            await save_guildcheck_snapshot(new_snap)
+        except Exception as e:
+            print(f"[guild_leave_watcher] Lỗi lưu snapshot sau xử lý: {e}")
+
+    async def _strip_roles(self, discord_guild: discord.Guild, player_id: str, ign: str, current_guild_name: str, guest_role_id: str, log_channel_id: str):
+        """Tìm Discord member theo registry, gỡ toàn bộ role hợp lệ, gán guest_role, gửi log."""
+        # Tìm discord_id qua bảng member_registry (ưu tiên) hoặc khớp nickname (fallback)
+        discord_member = None
+        reg_discord_id = None
+
+        rows, err = await async_execute(
+            lambda c: c.table("member_registry").select("discord_id").eq("player_id", player_id).maybe_single()
+        )
+        if not err and rows and hasattr(rows, "data") and rows.data:
+            reg_discord_id = rows.data.get("discord_id")
+            if reg_discord_id:
+                try:
+                    discord_member = discord_guild.get_member(int(reg_discord_id)) or await discord_guild.fetch_member(int(reg_discord_id))
+                except Exception:
+                    discord_member = None
+
+        # Fallback: tìm theo nickname nếu không có registry
+        if not discord_member:
+            ign_lower = ign.strip().lower()
+            for m in discord_guild.members:
+                if m.bot:
+                    continue
+                disp = m.display_name.strip()
+                name_tokens = disp
+                for sep in ["[", "]", "|", "(", ")"]:
+                    name_tokens = name_tokens.replace(sep, " ")
+                tokens = [t.strip().lower() for t in name_tokens.split() if t.strip()]
+                if ign_lower == disp.lower() or ign_lower in tokens:
+                    discord_member = m
+                    break
+
+        bot_top_role = discord_guild.me.top_role
+        removed_roles = []
+        notes = []
+
+        if discord_member:
+            # Lọc role có thể gỡ
+            removable = [
+                r for r in discord_member.roles
+                if r != discord_guild.default_role
+                and not r.managed
+                and r < bot_top_role
+                and str(r.id) != str(guest_role_id)
+            ]
+            if removable:
+                try:
+                    await discord_member.remove_roles(*removable, reason=f"Tự động gỡ role: {ign} đã rời guild in-game")
+                    removed_roles = [r.name for r in removable]
+                except Exception as e:
+                    notes.append(f"⚠️ Lỗi gỡ role: `{e}`")
+
+            # Gán guest_role nếu có cấu hình
+            if guest_role_id and str(guest_role_id).isdigit():
+                guest_role = discord_guild.get_role(int(guest_role_id))
+                if guest_role and guest_role < bot_top_role and guest_role not in discord_member.roles:
+                    try:
+                        await discord_member.add_roles(guest_role, reason=f"Gán role mặc định sau khi {ign} rời guild")
+                    except Exception as e:
+                        notes.append(f"⚠️ Lỗi gán role khách: `{e}`")
+
+            # Xóa registry entry sau khi strip
+            if reg_discord_id:
+                await registry_delete(reg_discord_id)
+
+        # Tạo embed log
+        embed = discord.Embed(
+            title="🚨 Phát hiện thành viên rời guild in-game",
+            color=0xe74c3c,
+            timestamp=datetime.now(timezone.utc),
+        )
+        embed.add_field(name="🎮 IGN", value=f"`{ign}`", inline=True)
+        embed.add_field(name="🏰 Guild hiện tại (game)", value=f"`{current_guild_name}`", inline=True)
+        if discord_member:
+            embed.add_field(name="💬 Discord", value=discord_member.mention, inline=True)
+            embed.add_field(
+                name="🗑️ Role đã gỡ",
+                value=", ".join(f"`{r}`" for r in removed_roles) if removed_roles else "_(không có role nào cần gỡ)_",
+                inline=False,
+            )
+            if guest_role_id and str(guest_role_id).isdigit():
+                guest_role = discord_guild.get_role(int(guest_role_id))
+                embed.add_field(name="🏷️ Role mặc định gán lại", value=f"`{guest_role.name}`" if guest_role else "`(không tìm thấy role)`", inline=True)
+        else:
+            embed.add_field(name="💬 Discord", value="❓ Không tìm thấy nick khớp trên server", inline=True)
+
+        if notes:
+            embed.add_field(name="⚠️ Ghi chú", value="\n".join(notes), inline=False)
+
+        embed.set_footer(text="Tự động gỡ role bởi GuildCheck • Albion Online API")
+        await self._send_log(discord_guild, log_channel_id, embed)
+
+    async def _send_log(self, discord_guild: discord.Guild, log_channel_id: str, embed: discord.Embed):
+        if not log_channel_id or not str(log_channel_id).isdigit():
+            return
+        channel = discord_guild.get_channel(int(log_channel_id))
+        if channel:
+            try:
+                await channel.send(embed=embed)
+            except Exception as e:
+                print(f"[guild_leave_watcher] Lỗi gửi log: {e}")
+
+    # --------------------------------------------------------------------------
+    # LỆNH /guildconfig
+    # --------------------------------------------------------------------------
+    @app_commands.command(name="guildconfig", description="Cấu hình GuildCheck & tính năng tự động gỡ role (Officer only)")
     @app_commands.describe(
         guild_id="Guild ID Albion (lấy từ URL killboard guild)",
-        region="Khu vực máy chủ (Asia, Americas, Europe)"
+        region="Khu vực máy chủ (Asia, Americas, Europe)",
+        auto_strip="Bật/tắt tự động gỡ role khi thành viên rời guild in-game",
+        log_channel="Kênh nhận thông báo khi bot tự động gỡ role",
+        guest_role="Role mặc định gán lại sau khi gỡ hết role guild (vd: Khách)",
+        clear_guest_role="Xóa cấu hình role mặc định (gỡ trắng hoàn toàn)",
     )
     @app_commands.choices(region=[
         app_commands.Choice(name="Châu Á (East)", value="Asia"),
         app_commands.Choice(name="Châu Mỹ (West)", value="Americas"),
-        app_commands.Choice(name="Châu Âu (EU)", value="Europe")
+        app_commands.Choice(name="Châu Âu (EU)", value="Europe"),
     ])
     async def guildconfig_cmd(
         self,
         interaction: discord.Interaction,
         guild_id: str = None,
-        region: app_commands.Choice[str] = None
+        region: app_commands.Choice[str] = None,
+        auto_strip: bool = None,
+        log_channel: discord.TextChannel = None,
+        guest_role: discord.Role = None,
+        clear_guest_role: bool = None,
     ):
         if not is_officer(interaction.user):
             return await interaction.response.send_message("❌ Bạn không có quyền!", ephemeral=True)
@@ -230,15 +583,44 @@ class GuildCheckCog(commands.Cog):
                     config["guild_id"] = guild_id.strip()
                 if region:
                     config["region"] = region.value
+                if auto_strip is not None:
+                    config["auto_strip_enabled"] = auto_strip
+                if log_channel:
+                    config["log_channel_id"] = str(log_channel.id)
+                if guest_role:
+                    config["guest_role_id"] = str(guest_role.id)
+                if clear_guest_role:
+                    config["guest_role_id"] = ""
                 await save_guildcheck_config(config)
         except Exception as error:
             return await interaction.followup.send(f"❌ Không thể cập nhật cấu hình GuildCheck: `{error}`", ephemeral=True)
-        lines = [f"🆔 Guild ID: `{config.get('guild_id') or 'chưa cấu hình'}`"]
-        lines.append(f"🌍 Region: `{config.get('region') or 'Asia'}`")
-        await interaction.edit_original_response(
-            content="✅ Đã lưu cấu hình GuildCheck:\n" + "\n".join(lines)
-        )
 
+        # Kiểm tra quyền manage_roles của bot
+        bot_member = interaction.guild.me if interaction.guild else None
+        role_warning = ""
+        if bot_member and not bot_member.guild_permissions.manage_roles:
+            role_warning = "\n\n⚠️ **Bot chưa có quyền `Manage Roles`!** Vui lòng cấp quyền này để bot có thể tự động gỡ role."
+
+        guest_role_obj = None
+        if config.get("guest_role_id") and str(config.get("guest_role_id", "")).isdigit() and interaction.guild:
+            guest_role_obj = interaction.guild.get_role(int(config["guest_role_id"]))
+
+        log_channel_obj = None
+        if config.get("log_channel_id") and str(config.get("log_channel_id", "")).isdigit() and interaction.guild:
+            log_channel_obj = interaction.guild.get_channel(int(config["log_channel_id"]))
+
+        lines = [
+            f"🆔 **Guild ID:** `{config.get('guild_id') or 'chưa cấu hình'}`",
+            f"🌍 **Region:** `{config.get('region') or 'Asia'}`",
+            f"🤖 **Tự động gỡ role:** `{'✅ Bật' if config.get('auto_strip_enabled') else '❌ Tắt'}`",
+            f"📢 **Kênh log:** {log_channel_obj.mention if log_channel_obj else '`chưa cấu hình`'}",
+            f"🏷️ **Role mặc định (Khách):** {guest_role_obj.mention if guest_role_obj else '`chưa cấu hình`'}",
+        ]
+        await interaction.edit_original_response(content="✅ **Cấu hình GuildCheck hiện tại:**\n" + "\n".join(lines) + role_warning)
+
+    # --------------------------------------------------------------------------
+    # LỆNH /guildcheck
+    # --------------------------------------------------------------------------
     @app_commands.command(name="guildcheck", description="Tra cứu xem một thành viên có ở trong Guild hay không")
     @app_commands.describe(ign="Tên nhân vật trong game (chính xác)")
     async def guildcheck_cmd(self, interaction: discord.Interaction, ign: str):
@@ -256,35 +638,213 @@ class GuildCheckCog(commands.Cog):
                 "❌ Chưa cấu hình Guild ID! Vui lòng nhờ Officer dùng `/guildconfig`.",
                 ephemeral=True,
             )
-        
+
         player = await albion_search_player(region, ign)
-        
+
         if player is None:
             embed = discord.Embed(
-                title="🔍 Kết Quả Tra Cứu", 
-                description=f"❌ **Không tìm thấy người chơi `{ign}`** trên khu vực `{region}`.\nVui lòng kiểm tra lại chính tả.", 
+                title="🔍 Kết Quả Tra Cứu",
+                description=f"❌ **Không tìm thấy người chơi `{ign}`** trên khu vực `{region}`.\nVui lòng kiểm tra lại chính tả.",
                 color=0xe74c3c
             )
             return await interaction.followup.send(embed=embed)
-            
+
         player_guild_id = player.get("GuildId", "")
         player_guild_name = player.get("GuildName", "Không có guild")
-        
+
         if player_guild_id == guild_id:
             embed = discord.Embed(
-                title="✅ Thành Viên Hợp Lệ", 
-                description=f"Người chơi **{player.get('Name')}** hiện **ĐANG** ở trong guild của chúng ta.", 
+                title="✅ Thành Viên Hợp Lệ",
+                description=f"Người chơi **{player.get('Name')}** hiện **ĐANG** ở trong guild của chúng ta.",
                 color=0x2ecc71
             )
         else:
             embed = discord.Embed(
-                title="🚨 Phát Hiện Ngoại Lai", 
-                description=f"Người chơi **{player.get('Name')}** hiện **KHÔNG** ở trong guild.\nĐang ở guild: `{player_guild_name}`", 
+                title="🚨 Phát Hiện Ngoại Lai",
+                description=f"Người chơi **{player.get('Name')}** hiện **KHÔNG** ở trong guild.\nĐang ở guild: `{player_guild_name}`",
                 color=0xe67e22
             )
-            
+
         await interaction.followup.send(embed=embed)
 
+    # --------------------------------------------------------------------------
+    # LỆNH /registertnc
+    # --------------------------------------------------------------------------
+    @app_commands.command(name="registertnc", description="Đăng ký IGN Albion với tài khoản Discord")
+    @app_commands.describe(
+        region="Khu vực server Albion của bạn",
+        ign="Tên nhân vật trong game (chính xác, phân biệt hoa/thường)",
+        target="[Officer] Đăng ký thay cho thành viên khác",
+    )
+    @app_commands.choices(region=[
+        app_commands.Choice(name="Châu Á (Asia)", value="Asia"),
+        app_commands.Choice(name="Châu Mỹ (Americas)", value="Americas"),
+        app_commands.Choice(name="Châu Âu (Europe)", value="Europe"),
+    ])
+    async def registertnc_cmd(
+        self,
+        interaction: discord.Interaction,
+        region: app_commands.Choice[str],
+        ign: str,
+        target: discord.Member = None,
+    ):
+        # Nếu có target → chỉ Officer mới dùng được
+        if target and not is_officer(interaction.user):
+            return await interaction.response.send_message(
+                "❌ Chỉ Officer mới có thể đăng ký thay cho người khác!", ephemeral=True
+            )
+
+        registrant = target or interaction.user
+        await interaction.response.defer(ephemeral=True)
+
+        # 1. Lấy guild_id Albion từ config
+        try:
+            config = await load_guildcheck_config()
+        except Exception as e:
+            return await interaction.followup.send(f"❌ Không thể đọc cấu hình: `{e}`", ephemeral=True)
+
+        guild_id_albion = config.get("guild_id", "").strip()
+        if not guild_id_albion:
+            return await interaction.followup.send(
+                "❌ Chưa cấu hình Guild ID! Nhờ Officer dùng `/guildconfig` trước.", ephemeral=True
+            )
+
+        # 2. Tìm player trên Albion API
+        player = await albion_search_player(region.value, ign.strip())
+        if player is None:
+            return await interaction.followup.send(
+                f"❌ Không tìm thấy nhân vật **`{ign}`** trên khu vực **{region.name}**.\n"
+                "Kiểm tra lại chính tả hoặc chọn đúng khu vực server nhé.",
+                ephemeral=True,
+            )
+
+        # 3. Kiểm tra có trong guild TNC không
+        player_guild_id = player.get("GuildId", "")
+        player_guild_name = player.get("GuildName") or "Không có guild"
+        if player_guild_id != guild_id_albion:
+            return await interaction.followup.send(
+                f"❌ Nhân vật **`{player.get('Name')}`** hiện **không ở trong guild TNC**.\n"
+                f"Guild hiện tại trong game: `{player_guild_name}`\n\n"
+                "Chỉ thành viên đang trong guild TNC mới được đăng ký.",
+                ephemeral=True,
+            )
+
+        # 4. Kiểm tra player_id chưa được đăng ký bởi người khác
+        existing_by_pid, _ = await async_execute(
+            lambda c: c.table("member_registry")
+                .select("discord_id, ign")
+                .eq("player_id", player["Id"])
+                .maybe_single()
+        )
+        existing_by_pid_data = existing_by_pid.data if existing_by_pid and hasattr(existing_by_pid, "data") else None
+        if existing_by_pid_data and str(existing_by_pid_data.get("discord_id")) != str(registrant.id):
+            other_id = existing_by_pid_data.get("discord_id")
+            return await interaction.followup.send(
+                f"❌ IGN **`{player.get('Name')}`** đã được đăng ký bởi <@{other_id}>.\n"
+                "Nếu có nhầm lẫn, nhờ Officer dùng `/unregistertnc` để xóa.",
+                ephemeral=True,
+            )
+
+        # 5. Lưu vào member_registry
+        err = await registry_upsert(
+            discord_id=str(registrant.id),
+            player_id=player["Id"],
+            ign=player.get("Name", ign.strip()),
+            region=region.value,
+            registered_by=str(interaction.user.id) if target else None,
+        )
+        if err:
+            return await interaction.followup.send(
+                f"❌ Lỗi khi lưu đăng ký vào database: `{err}`", ephemeral=True
+            )
+
+        embed = discord.Embed(
+            title="✅ Đăng Ký Thành Công!",
+            color=0x2ecc71,
+            timestamp=datetime.now(timezone.utc),
+        )
+        embed.add_field(name="🎮 IGN", value=f"`{player.get('Name')}`", inline=True)
+        embed.add_field(name="🌍 Region", value=f"`{region.name}`", inline=True)
+        embed.add_field(name="🏰 Guild In-Game", value=f"`{player_guild_name}`", inline=True)
+        if target:
+            embed.add_field(name="👤 Đăng ký cho", value=registrant.mention, inline=True)
+            embed.add_field(name="📝 Officer", value=interaction.user.mention, inline=True)
+        else:
+            embed.add_field(name="💬 Discord", value=registrant.mention, inline=True)
+        embed.set_footer(text="Bot sẽ tự động gỡ role khi bạn rời guild TNC in-game.")
+        await interaction.followup.send(embed=embed, ephemeral=True)
+
+    # --------------------------------------------------------------------------
+    # LỆNH /unregistertnc
+    # --------------------------------------------------------------------------
+    @app_commands.command(name="unregistertnc", description="Xóa đăng ký IGN Albion")
+    @app_commands.describe(target="[Officer] Xóa đăng ký của thành viên khác (mặc định: xóa của chính bạn)")
+    async def unregistertnc_cmd(self, interaction: discord.Interaction, target: discord.Member = None):
+        if target and not is_officer(interaction.user):
+            return await interaction.response.send_message(
+                "❌ Chỉ Officer mới có thể xóa đăng ký của người khác!", ephemeral=True
+            )
+        registrant = target or interaction.user
+        await interaction.response.defer(ephemeral=True)
+
+        existing = await registry_get(str(registrant.id))
+        if not existing:
+            name_part = registrant.mention if target else "bạn"
+            return await interaction.followup.send(
+                f"❌ Không tìm thấy đăng ký nào của {name_part}.", ephemeral=True
+            )
+
+        err = await registry_delete(str(registrant.id))
+        if err:
+            return await interaction.followup.send(
+                f"❌ Lỗi khi xóa đăng ký: `{err}`", ephemeral=True
+            )
+
+        ign = existing.get("ign", "?")
+        await interaction.followup.send(
+            f"✅ Đã xóa đăng ký **`{ign}`** của {registrant.mention}." if target
+            else f"✅ Đã xóa đăng ký **`{ign}`** của bạn.",
+            ephemeral=True,
+        )
+
+    # --------------------------------------------------------------------------
+    # LỆNH /registerlist
+    # --------------------------------------------------------------------------
+    @app_commands.command(name="registerlist", description="Xem danh sách thành viên đã đăng ký IGN (Officer only)")
+    async def registerlist_cmd(self, interaction: discord.Interaction):
+        if not is_officer(interaction.user):
+            return await interaction.response.send_message("❌ Bạn không có quyền Officer!", ephemeral=True)
+        await interaction.response.defer(ephemeral=False)
+
+        rows = await registry_get_all()
+        if not rows:
+            return await interaction.followup.send("📭 Chưa có thành viên nào đăng ký IGN.", ephemeral=False)
+
+        lines = []
+        for i, row in enumerate(rows, 1):
+            discord_id = row.get("discord_id", "?")
+            ign = row.get("ign", "?")
+            region = row.get("region", "?")
+            registered_by = row.get("registered_by")
+            by_part = f" _(Officer: <@{registered_by}>)_" if registered_by else ""
+            lines.append(f"`{i:03d}` <@{discord_id}> → **{ign}** `[{region}]`{by_part}")
+
+        # Phân trang đơn giản: gửi từng chunk 20 người
+        chunk_size = 20
+        chunks = [lines[i:i + chunk_size] for i in range(0, len(lines), chunk_size)]
+        for idx, chunk in enumerate(chunks):
+            embed = discord.Embed(
+                title=f"📋 Danh Sách Đăng Ký IGN ({len(rows)} thành viên)",
+                description="\n".join(chunk),
+                color=0x3498db,
+            )
+            if len(chunks) > 1:
+                embed.set_footer(text=f"Trang {idx + 1}/{len(chunks)}")
+            await interaction.followup.send(embed=embed)
+
+    # --------------------------------------------------------------------------
+    # LỆNH /guildmembers
+    # --------------------------------------------------------------------------
     @app_commands.command(name="guildmembers", description="Lấy danh sách thành viên Guild in-game từ Albion Online API")
     @app_commands.describe(
         sort_by="Tiêu chí sắp xếp danh sách",
@@ -326,10 +886,8 @@ class GuildCheckCog(commands.Cog):
         if not members:
             return await interaction.followup.send("📭 Guild hiện tại chưa có thành viên nào trên hệ thống API.")
 
-        # Lấy tên guild từ member đầu tiên hoặc info
         guild_name = members[0].get("GuildName") or "TNC Guild"
 
-        # Sắp xếp
         sort_key = sort_by.value if sort_by else "kill_fame"
         if sort_key == "kill_fame":
             members.sort(key=lambda x: x.get("KillFame") or 0, reverse=True)
@@ -368,7 +926,7 @@ class GuildCheckCog(commands.Cog):
                 kf = format_fame(m.get("KillFame", 0))
                 df = format_fame(m.get("DeathFame", 0))
                 txt_lines.append(f"{idx:<5} {name:<25} {kf:<15} {df:<15}")
-            
+
             content_bytes = "\n".join(txt_lines).encode("utf-8")
             file_attachment = discord.File(
                 fp=io.BytesIO(content_bytes),
@@ -380,6 +938,9 @@ class GuildCheckCog(commands.Cog):
         else:
             await interaction.followup.send(embed=embed, view=view)
 
+    # --------------------------------------------------------------------------
+    # LỆNH /guildaudit
+    # --------------------------------------------------------------------------
     @app_commands.command(name="guildaudit", description="Đối soát chéo thành viên In-game vs Thành viên Discord (Officer only)")
     async def guildaudit_cmd(self, interaction: discord.Interaction):
         if not is_officer(interaction.user):
@@ -410,21 +971,18 @@ class GuildCheckCog(commands.Cog):
 
         guild_name = members[0].get("GuildName") if members else "TNC Guild"
 
-        # Lập map in-game IGN -> member data
         ingame_map = {}
         for m in members:
             ign = (m.get("Name") or "").strip()
             if ign:
                 ingame_map[ign.lower()] = ign
 
-        # Lập map discord name / display_name
         discord_users = {}
         for dm in guild.members:
             if dm.bot:
                 continue
             disp = dm.display_name.strip()
             name_only = disp
-            # Tách các định dạng phổ biến: [TAG] Name, TNC | Name, Name (IGN)
             for sep in ["[", "]", "|", "(", ")"]:
                 name_only = name_only.replace(sep, " ")
             tokens = [t.strip().lower() for t in name_only.split() if t.strip()]
@@ -435,7 +993,6 @@ class GuildCheckCog(commands.Cog):
                 "raw_lower": disp.lower()
             }
 
-        # Đối soát
         matched_ingame = set()
         matched_discord = set()
 
@@ -449,7 +1006,6 @@ class GuildCheckCog(commands.Cog):
         unmatched_ingame = [orig for lower, orig in ingame_map.items() if orig not in matched_ingame]
         unmatched_ingame.sort()
 
-        # Tạo file báo cáo chi tiết
         report_lines = [
             f"BÁO CÁO ĐỐI SOÁT THÀNH VIÊN GUILD: {guild_name}",
             f"Khu vực: {region} | Guild ID: {guild_id}",
@@ -539,6 +1095,7 @@ class GuildCheckCog(commands.Cog):
         except Exception as e:
             print(f"[newmembers] Lỗi: {e}")
             await interaction.followup.send(f"❌ Lỗi khi lấy danh sách thành viên mới: `{e}`")
+
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(GuildCheckCog(bot))

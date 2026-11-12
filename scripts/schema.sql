@@ -136,6 +136,18 @@ CREATE TABLE IF NOT EXISTS public.system_logs (
     created_at timestamptz NOT NULL DEFAULT now()
 );
 
+-- Bảng đăng ký IGN Albion ↔ Discord ID (dùng cho tự động gỡ role khi out guild).
+CREATE TABLE IF NOT EXISTS public.member_registry (
+    discord_id text PRIMARY KEY,
+    player_id text NOT NULL UNIQUE,
+    ign text NOT NULL,
+    region text NOT NULL DEFAULT 'Asia',
+    registered_by text,
+    registered_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS member_registry_player_id_idx ON public.member_registry(player_id);
+
 -- Bảng lịch sử chatbot: giữ contract đã có, không chuyển dữ liệu repo khác.
 CREATE TABLE IF NOT EXISTS public.chat_history (
     id text PRIMARY KEY,

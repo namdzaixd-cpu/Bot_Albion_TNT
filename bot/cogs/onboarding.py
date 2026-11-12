@@ -10,6 +10,7 @@ from core.config import GUILD_NAME, GUILD_TAG, GUILD_ID
 from core.permissions import is_officer
 from core.db import async_execute
 from core.config_store import get_config_async, invalidate
+from cogs.guildcheck import registry_upsert, load_guildcheck_config
 
 
 class OnboardConfig:
@@ -725,6 +726,35 @@ class OfficerApprovalView(discord.ui.View):
                 await interaction.channel.send(welcome_msg)
             except Exception as error:
                 await interaction.followup.send(f"❌ Đơn đã duyệt nhưng không thể gửi lời chào: `{error}`", ephemeral=True)
+
+            # Tự động đăng ký vào member_registry khi duyệt đơn
+            if member and target_user_id:
+                try:
+                    gc_config = await load_guildcheck_config()
+                    gc_region = gc_config.get("region", "Asia")
+                    # Lấy player_id từ embed footer nếu có, hoặc search API
+                    player_id = None
+                    embed_ref = interaction.message.embeds[0] if interaction.message and interaction.message.embeds else None
+                    if embed_ref and embed_ref.footer and embed_ref.footer.text:
+                        for part in embed_ref.footer.text.split("|"):
+                            part = part.strip()
+                            if part.startswith("PlayerID:"):
+                                player_id = part.split("PlayerID:", 1)[1].strip()
+                    if not player_id:
+                        # Fallback: search API để lấy player_id
+                        api_data = await self.fetch_albion_player(ign_name)
+                        if api_data:
+                            player_id = api_data.get("Id")
+                    if player_id and ign_name:
+                        await registry_upsert(
+                            discord_id=str(target_user_id),
+                            player_id=player_id,
+                            ign=ign_name,
+                            region=gc_region,
+                            registered_by=str(interaction.user.id),
+                        )
+                except Exception as reg_err:
+                    print(f"[onboarding] Lỗi auto-register vào member_registry: {reg_err}")
 
     @discord.ui.button(label="Rename", style=discord.ButtonStyle.primary, custom_id="onboard_rename")
     async def rename_member(self, interaction: discord.Interaction, button: discord.ui.Button):
