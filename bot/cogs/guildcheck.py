@@ -596,17 +596,17 @@ class GuildCheckCog(commands.Cog):
             return await interaction.followup.send(f"❌ Không thể cập nhật cấu hình GuildCheck: `{error}`", ephemeral=True)
 
         # Kiểm tra quyền manage_roles của bot
-        bot_member = interaction.guild.me if interaction.guild else None
+        bot_member = getattr(interaction.guild, "me", None)
         role_warning = ""
         if bot_member and not bot_member.guild_permissions.manage_roles:
             role_warning = "\n\n⚠️ **Bot chưa có quyền `Manage Roles`!** Vui lòng cấp quyền này để bot có thể tự động gỡ role."
 
         guest_role_obj = None
-        if config.get("guest_role_id") and str(config.get("guest_role_id", "")).isdigit() and interaction.guild:
+        if config.get("guest_role_id") and str(config.get("guest_role_id", "")).isdigit() and hasattr(interaction.guild, "get_role"):
             guest_role_obj = interaction.guild.get_role(int(config["guest_role_id"]))
 
         log_channel_obj = None
-        if config.get("log_channel_id") and str(config.get("log_channel_id", "")).isdigit() and interaction.guild:
+        if config.get("log_channel_id") and str(config.get("log_channel_id", "")).isdigit() and hasattr(interaction.guild, "get_channel"):
             log_channel_obj = interaction.guild.get_channel(int(config["log_channel_id"]))
 
         lines = [
