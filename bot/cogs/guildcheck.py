@@ -297,6 +297,10 @@ class GuildCheckCog(commands.Cog):
         self.bot = bot
         self._config_lock = asyncio.Lock()
         self._watch_lock = asyncio.Lock()
+        # Bộ đếm vắng mặt liên tiếp: {player_id: missing_count}
+        # Chỉ xử lý out guild khi vắng mặt liên tục ít nhất REQUIRED_MISSING_CYCLES lần (15 phút)
+        self._missing_counts = {}
+        self.REQUIRED_MISSING_CYCLES = 3
 
     async def cog_load(self):
         self.guild_leave_watcher.start()
@@ -377,6 +381,12 @@ class GuildCheckCog(commands.Cog):
 
         # 3. Tìm missing player_id
         missing_ids = set(prev_members.keys()) - set(curr_members.keys())
+
+        # Reset bộ đếm missing cho những người vẫn còn hoặc vừa xuất hiện lại
+        for pid in list(self._missing_counts.keys()):
+            if pid in curr_members:
+                del self._missing_counts[pid]
+
         if not missing_ids:
             # Cập nhật snapshot nếu có người mới vào (ngược lại không gỡ ai)
             new_snap = {
@@ -412,8 +422,19 @@ class GuildCheckCog(commands.Cog):
         next_members = dict(curr_members)  # sẽ bổ sung những người cần giữ lại
 
         for player_id in missing_ids:
-            await asyncio.sleep(0.5)  # tránh spam API
             ign = prev_members.get(player_id, player_id)
+
+            # Tăng bộ đếm vắng mặt liên tiếp
+            count = self._missing_counts.get(player_id, 0) + 1
+            self._missing_counts[player_id] = count
+
+            # Nếu chưa đủ 3 lần vắng mặt liên tiếp (chưa đủ 15 phút) -> giữ lại snapshot, chưa gỡ
+            if count < self.REQUIRED_MISSING_CYCLES:
+                next_members[player_id] = ign
+                print(f"[guild_leave_watcher] {ign} ({player_id}) vắng mặt {count}/{self.REQUIRED_MISSING_CYCLES} lần. Giữ lại theo dõi tiếp.")
+                continue
+
+            await asyncio.sleep(0.5)  # tránh spam API
 
             # Double-check qua API cá nhân
             player_info = await albion_get_player_by_id(region, player_id)
@@ -426,9 +447,19 @@ class GuildCheckCog(commands.Cog):
             if player_info.get("GuildId") == guild_id_albion:
                 # Vẫn còn trong guild (API danh sách bị cache thiếu) → giữ lại
                 next_members[player_id] = ign
+                self._missing_counts.pop(player_id, None)
                 continue
 
-            # Xác nhận đã out guild → xử lý Discord
+            # Fallback an toàn lần 2: Search API theo tên nhân vật (search cập nhật nhanh hơn player endpoint)
+            search_res = await albion_search_player(region, ign)
+            if search_res and search_res.get("GuildId") == guild_id_albion:
+                next_members[player_id] = ign
+                self._missing_counts.pop(player_id, None)
+                print(f"[guild_leave_watcher] {ign} search API vẫn còn guild TNC, giữ lại snapshot.")
+                continue
+
+            # Xác nhận đã out guild liên tiếp qua cả 3 vòng kiểm tra → xử lý Discord
+            self._missing_counts.pop(player_id, None)
             current_guild_name = player_info.get("GuildName") or "Không có guild"
             await self._strip_roles(discord_guild, player_id, ign, current_guild_name, guest_role_id, log_channel_id)
 
@@ -445,8 +476,7 @@ class GuildCheckCog(commands.Cog):
             print(f"[guild_leave_watcher] Lỗi lưu snapshot sau xử lý: {e}")
 
     async def _strip_roles(self, discord_guild: discord.Guild, player_id: str, ign: str, current_guild_name: str, guest_role_id: str, log_channel_id: str):
-        """Tìm Discord member theo registry, gỡ toàn bộ role hợp lệ, gán guest_role, gửi log."""
-        # Tìm discord_id qua bảng member_registry (ưu tiên) hoặc khớp nickname (fallback)
+        """Tìm Discord member theo registry ĐÃ XÁC THỰC, gỡ toàn bộ role hợp lệ, gán guest_role, gửi log."""
         discord_member = None
         reg_discord_id = None
 
@@ -461,20 +491,11 @@ class GuildCheckCog(commands.Cog):
                 except Exception:
                     discord_member = None
 
-        # Fallback: tìm theo nickname nếu không có registry
-        if not discord_member:
-            ign_lower = ign.strip().lower()
-            for m in discord_guild.members:
-                if m.bot:
-                    continue
-                disp = m.display_name.strip()
-                name_tokens = disp
-                for sep in ["[", "]", "|", "(", ")"]:
-                    name_tokens = name_tokens.replace(sep, " ")
-                tokens = [t.strip().lower() for t in name_tokens.split() if t.strip()]
-                if ign_lower == disp.lower() or ign_lower in tokens:
-                    discord_member = m
-                    break
+        # CHỈ GỠ ROLE KHI CÓ LIÊN KẾT XÁC THỰC TRONG member_registry!
+        # Tuyệt đối KHÔNG fallback đoán mò theo nickname để tránh gỡ nhầm người chưa liên kết.
+        if not discord_member or not reg_discord_id:
+            print(f"[guild_leave_watcher] Bỏ qua {ign} ({player_id}): Chưa liên kết trong member_registry.")
+            return
 
         bot_top_role = discord_guild.me.top_role
         removed_roles = []
@@ -915,6 +936,12 @@ class GuildCheckCog(commands.Cog):
                 continue
 
             if p_info.get("GuildId") == guild_id_albion:
+                kept_count += 1
+                continue
+
+            # Fallback an toàn lần 2: Search API theo tên
+            s_res = await albion_search_player(region, ign)
+            if s_res and s_res.get("GuildId") == guild_id_albion:
                 kept_count += 1
                 continue
 

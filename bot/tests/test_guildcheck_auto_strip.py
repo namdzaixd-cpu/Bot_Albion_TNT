@@ -181,6 +181,9 @@ def test_watcher_keeps_member_when_double_check_still_in_guild():
 def test_watcher_strips_roles_when_confirmed_left():
     async def run():
         cog = _make_cog()
+        # Đặt bộ đếm vắng mặt = 2 để lần này là lần thứ 3 (đủ ngưỡng)
+        cog._missing_counts["p2"] = 2
+
         config = {
             "guild_id": "g1", "region": "Asia",
             "auto_strip_enabled": True, "log_channel_id": "", "guest_role_id": ""
@@ -200,11 +203,12 @@ def test_watcher_strips_roles_when_confirmed_left():
             mock.patch.object(guildcheck, "albion_get_guild_members", new=mock.AsyncMock(return_value=curr_raw)),
             mock.patch.object(guildcheck, "load_guildcheck_snapshot", new=mock.AsyncMock(return_value=snapshot)),
             mock.patch.object(guildcheck, "albion_get_player_by_id", new=mock.AsyncMock(return_value=player_info)),
+            mock.patch.object(guildcheck, "albion_search_player", new=mock.AsyncMock(return_value=None)),
             mock.patch.object(guildcheck, "save_guildcheck_snapshot", new=mock.AsyncMock()),
             mock.patch.object(cog, "_strip_roles", new=mock.AsyncMock()) as mock_strip,
         ):
             await cog._run_leave_watcher()
-            # p2 đã rời guild → gọi _strip_roles
+            # p2 đã rời guild và đủ 3 lần vắng mặt → gọi _strip_roles
             mock_strip.assert_awaited_once()
             call_args = mock_strip.call_args
             assert call_args.args[2] == "Player2"  # ign
@@ -277,6 +281,7 @@ def test_forcestrip_cmd_strips_out_guild_member():
             mock.patch.object(guildcheck, "albion_get_guild_members", new=mock.AsyncMock(return_value=curr_raw)),
             mock.patch.object(guildcheck, "registry_get_all", new=mock.AsyncMock(return_value=registered)),
             mock.patch.object(guildcheck, "albion_get_player_by_id", new=mock.AsyncMock(return_value=p2_info)),
+            mock.patch.object(guildcheck, "albion_search_player", new=mock.AsyncMock(return_value=None)),
             mock.patch.object(guildcheck, "save_guildcheck_snapshot", new=mock.AsyncMock()),
             mock.patch.object(cog, "_strip_roles", new=mock.AsyncMock()) as mock_strip,
         ):

@@ -10,7 +10,7 @@ from core.config import GUILD_NAME, GUILD_TAG, GUILD_ID
 from core.permissions import is_officer
 from core.db import async_execute
 from core.config_store import get_config_async, invalidate
-from cogs.guildcheck import registry_upsert, load_guildcheck_config
+from cogs.guildcheck import load_guildcheck_config
 
 
 class OnboardConfig:
@@ -727,34 +727,19 @@ class OfficerApprovalView(discord.ui.View):
             except Exception as error:
                 await interaction.followup.send(f"❌ Đơn đã duyệt nhưng không thể gửi lời chào: `{error}`", ephemeral=True)
 
-            # Tự động đăng ký vào member_registry khi duyệt đơn
-            if member and target_user_id:
-                try:
-                    gc_config = await load_guildcheck_config()
-                    gc_region = gc_config.get("region", "Asia")
-                    # Lấy player_id từ embed footer nếu có, hoặc search API
-                    player_id = None
-                    embed_ref = interaction.message.embeds[0] if interaction.message and interaction.message.embeds else None
-                    if embed_ref and embed_ref.footer and embed_ref.footer.text:
-                        for part in embed_ref.footer.text.split("|"):
-                            part = part.strip()
-                            if part.startswith("PlayerID:"):
-                                player_id = part.split("PlayerID:", 1)[1].strip()
-                    if not player_id:
-                        # Fallback: search API để lấy player_id
-                        api_data = await self.fetch_albion_player(ign_name)
-                        if api_data:
-                            player_id = api_data.get("Id")
-                    if player_id and ign_name:
-                        await registry_upsert(
-                            discord_id=str(target_user_id),
-                            player_id=player_id,
-                            ign=ign_name,
-                            region=gc_region,
-                            registered_by=str(interaction.user.id),
-                        )
-                except Exception as reg_err:
-                    print(f"[onboarding] Lỗi auto-register vào member_registry: {reg_err}")
+            # Nhắc nhở thành viên đăng ký IGN sau khi đã vào guild in-game
+            # Lưu ý: Không tự ý đăng ký ngay khi Accept vì lúc này người chơi mới chỉ nộp đơn in-game,
+            # chưa được duyệt in-game nên API Albion chưa có tên họ trong TNC.
+            # Sau khi được duyệt in-game, họ hoặc Officer dùng /registertnc để kích hoạt bảo vệ.
+            remind_msg = (
+                f"📌 **Lưu ý:** Sau khi Officer duyệt đơn của bạn **trong game Albion**, "
+                f"hãy gõ lệnh `/registertnc region:{gc_region} ign:{ign_name}` "
+                f"để hoàn tất xác thực thành viên chính thức của {GUILD_TAG} nhé!"
+            )
+            try:
+                await interaction.channel.send(remind_msg)
+            except Exception:
+                pass
 
     @discord.ui.button(label="Rename", style=discord.ButtonStyle.primary, custom_id="onboard_rename")
     async def rename_member(self, interaction: discord.Interaction, button: discord.ui.Button):
