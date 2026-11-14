@@ -388,7 +388,7 @@ BEGIN
     VALUES (1, 'Chưa có dữ liệu')
     ON CONFLICT (id) DO NOTHING;
     PERFORM 1 FROM public.sp_metadata WHERE id = 1 FOR UPDATE;
-    DELETE FROM public.user_economy;
+    DELETE FROM public.user_economy WHERE true;
     UPDATE public.sp_metadata
     SET last_update = 'N/A', last_update_ts = NULL, updated_at = now()
     WHERE id = 1;
