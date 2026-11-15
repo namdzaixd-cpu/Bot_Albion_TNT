@@ -10,7 +10,7 @@ from core.config import GUILD_NAME, GUILD_TAG, GUILD_ID
 from core.permissions import is_officer
 from core.db import async_execute
 from core.config_store import get_config_async, invalidate
-from cogs.guildcheck import load_guildcheck_config
+from cogs.guildcheck import load_guildcheck_config, registry_upsert, albion_search_player
 
 
 class OnboardConfig:
@@ -638,13 +638,14 @@ class OfficerApprovalView(discord.ui.View):
                 if child.custom_id == "onboard_rename":
                     child.disabled = True
 
-    async def _set_message_state(self, message, embed, status, ign_name, yob, *, content, actor, target_user_id=None):
+    async def _set_message_state(self, message, embed, status, ign_name, yob, *, content, actor, target_user_id=None, registered=False):
         prefix = "✅ Đã duyệt" if status == "approved" else "❌ Đã từ chối"
         if embed:
             embed.title = f"{prefix}: {ign_name}"
             embed.color = discord.Color.green() if status == "approved" else discord.Color.red()
             user_part = f"User: {target_user_id} | " if target_user_id else ""
-            footer = f"{user_part}YOB: {yob} | {status.title()} bởi {actor}"
+            reg_part = " | Đã register" if (status == "approved" and registered) else ""
+            footer = f"{user_part}YOB: {yob} | {status.title()} bởi {actor}{reg_part}"
             if message.id in self.cog.renamed_applications:
                 footer += " | Nickname đã đổi"
             embed.set_footer(text=footer)
@@ -697,7 +698,33 @@ class OfficerApprovalView(discord.ui.View):
                     "⚠️ Không tìm thấy thành viên này trong server (có thể họ đã out).", ephemeral=True
                 )
 
+            # Kiểm tra xem thành viên đã ở trong guild in-game hay chưa để register
+            is_registered_now = False
+            gc_region = "Asia"
+            try:
+                gc_config = await load_guildcheck_config()
+                gc_region = gc_config.get("region", "Asia")
+                guild_id_albion = gc_config.get("guild_id", "").strip()
+
+                if guild_id_albion and member and target_user_id:
+                    # Tra cứu thông tin in-game của nhân vật
+                    p_data = await albion_search_player(gc_region, ign_name)
+                    if p_data and p_data.get("GuildId") == guild_id_albion:
+                        # Thực tế ĐÃ Ở TRONG GUILD TNC IN-GAME -> Đăng ký ngay!
+                        reg_err = await registry_upsert(
+                            discord_id=str(target_user_id),
+                            player_id=p_data["Id"],
+                            ign=p_data.get("Name", ign_name),
+                            region=gc_region,
+                            registered_by=str(interaction.user.id),
+                        )
+                        if not reg_err:
+                            is_registered_now = True
+            except Exception as check_err:
+                print(f"[onboarding] Lỗi kiểm tra register khi duyệt đơn: {check_err}")
+
             message = interaction.message
+            reg_status_text = " • [Đã register]" if is_registered_now else ""
             try:
                 await self._set_message_state(
                     message,
@@ -705,9 +732,10 @@ class OfficerApprovalView(discord.ui.View):
                     "approved",
                     ign_name,
                     yob,
-                    content=f"✅ Đơn apply của **{ign_name}** đã được duyệt bởi <@{interaction.user.id}>.",
+                    content=f"✅ Đơn apply của **{ign_name}** đã được duyệt bởi <@{interaction.user.id}>.{reg_status_text}",
                     actor=interaction.user.display_name,
                     target_user_id=target_user_id,
+                    registered=is_registered_now,
                 )
             except Exception as error:
                 return await interaction.followup.send(f"❌ Không thể cập nhật trạng thái đơn: `{error}`", ephemeral=True)
@@ -727,19 +755,17 @@ class OfficerApprovalView(discord.ui.View):
             except Exception as error:
                 await interaction.followup.send(f"❌ Đơn đã duyệt nhưng không thể gửi lời chào: `{error}`", ephemeral=True)
 
-            # Nhắc nhở thành viên đăng ký IGN sau khi đã vào guild in-game
-            # Lưu ý: Không tự ý đăng ký ngay khi Accept vì lúc này người chơi mới chỉ nộp đơn in-game,
-            # chưa được duyệt in-game nên API Albion chưa có tên họ trong TNC.
-            # Sau khi được duyệt in-game, họ hoặc Officer dùng /registertnc để kích hoạt bảo vệ.
-            remind_msg = (
-                f"📌 **Lưu ý:** Sau khi Officer duyệt đơn của bạn **trong game Albion**, "
-                f"hãy gõ lệnh `/registertnc region:{gc_region} ign:{ign_name}` "
-                f"để hoàn tất xác thực thành viên chính thức của {GUILD_TAG} nhé!"
-            )
-            try:
-                await interaction.channel.send(remind_msg)
-            except Exception:
-                pass
+            # Nếu chưa ở trong guild in-game lúc duyệt đơn -> gửi nhắc nhở register sau
+            if not is_registered_now:
+                remind_msg = (
+                    f"📌 **Lưu ý:** Sau khi Officer duyệt đơn của bạn **trong game Albion**, "
+                    f"hãy gõ lệnh `/registertnc region:{gc_region} ign:{ign_name}` "
+                    f"để hoàn tất xác thực thành viên chính thức của {GUILD_TAG} nhé!"
+                )
+                try:
+                    await interaction.channel.send(remind_msg)
+                except Exception:
+                    pass
 
     @discord.ui.button(label="Rename", style=discord.ButtonStyle.primary, custom_id="onboard_rename")
     async def rename_member(self, interaction: discord.Interaction, button: discord.ui.Button):

@@ -30,6 +30,7 @@ GUILDCHECK_CONFIG_DEFAULT = lambda: {
     "auto_strip_enabled": False,
     "log_channel_id": "",
     "guest_role_id": "",
+    "whitelist_igns": [],
 }
 GUILDCHECK_SNAPSHOT_DEFAULT = lambda: {
     "guild_id": "",
@@ -246,6 +247,91 @@ class GuildMembersPaginationView(discord.ui.View):
             inline=False
         )
         embed.set_footer(text=f"Trang {self.current_page + 1}/{self.total_pages} • Dữ liệu từ Albion Online Official API")
+        return embed
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.author.id:
+            await interaction.response.send_message("❌ Bạn không phải người dùng lệnh này!", ephemeral=True)
+            return False
+        return True
+
+    @discord.ui.button(label="⏮", style=discord.ButtonStyle.secondary, row=0)
+    async def first_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.current_page = 0
+        self.update_buttons()
+        await interaction.response.edit_message(embed=self.get_embed(), view=self)
+
+    @discord.ui.button(label="◀", style=discord.ButtonStyle.primary, row=0)
+    async def prev_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.current_page > 0:
+            self.current_page -= 1
+        self.update_buttons()
+        await interaction.response.edit_message(embed=self.get_embed(), view=self)
+
+    @discord.ui.button(label="Trang 1/1", style=discord.ButtonStyle.secondary, disabled=True, row=0)
+    async def page_indicator(self, interaction: discord.Interaction, button: discord.ui.Button):
+        pass
+
+    @discord.ui.button(label="▶", style=discord.ButtonStyle.primary, row=0)
+    async def next_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.current_page < self.total_pages - 1:
+            self.current_page += 1
+        self.update_buttons()
+        await interaction.response.edit_message(embed=self.get_embed(), view=self)
+
+    @discord.ui.button(label="⏭", style=discord.ButtonStyle.secondary, row=0)
+    async def last_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.current_page = self.total_pages - 1
+        self.update_buttons()
+        await interaction.response.edit_message(embed=self.get_embed(), view=self)
+
+    async def on_timeout(self):
+        for child in self.children:
+            child.disabled = True
+
+
+class RegisterListPaginationView(discord.ui.View):
+    def __init__(self, author: discord.User, rows: list):
+        super().__init__(timeout=180)
+        self.author = author
+        self.rows = rows
+        self.current_page = 0
+        self.per_page = 15
+        self.total_pages = max(1, (len(rows) + self.per_page - 1) // self.per_page)
+        self.update_buttons()
+
+    def update_buttons(self):
+        self.first_btn.disabled = (self.current_page == 0)
+        self.prev_btn.disabled = (self.current_page == 0)
+        self.page_indicator.label = f"Trang {self.current_page + 1}/{self.total_pages} ({len(self.rows)} TV)"
+        self.next_btn.disabled = (self.current_page >= self.total_pages - 1)
+        self.last_btn.disabled = (self.current_page >= self.total_pages - 1)
+
+    def get_embed(self) -> discord.Embed:
+        start_idx = self.current_page * self.per_page
+        end_idx = start_idx + self.per_page
+        page_items = self.rows[start_idx:end_idx]
+
+        embed = discord.Embed(
+            title=f"📋 Danh Sách Thành Viên Đã Đăng Ký IGN ({len(self.rows)} người)",
+            description=f"👥 Tổng cộng: **{len(self.rows)}** thành viên đã liên kết Discord ↔ IGN\n───────────────────────────",
+            color=0x2ecc71
+        )
+        lines = []
+        for i, row in enumerate(page_items, start=start_idx + 1):
+            discord_id = row.get("discord_id", "?")
+            ign = row.get("ign", "?")
+            region = row.get("region", "?")
+            registered_by = row.get("registered_by")
+            by_part = f" _(bởi <@{registered_by}>)_" if registered_by and registered_by != discord_id else ""
+            lines.append(f"`#{i:03d}` <@{discord_id}> → **{ign}** `[{region}]`{by_part}")
+
+        embed.add_field(
+            name="Danh sách chi tiết",
+            value="\n".join(lines) if lines else "📭 Không có dữ liệu.",
+            inline=False
+        )
+        embed.set_footer(text=f"Trang {self.current_page + 1}/{self.total_pages} • TNC Guild Management")
         return embed
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
@@ -630,12 +716,14 @@ class GuildCheckCog(commands.Cog):
         if config.get("log_channel_id") and str(config.get("log_channel_id", "")).isdigit() and hasattr(interaction.guild, "get_channel"):
             log_channel_obj = interaction.guild.get_channel(int(config["log_channel_id"]))
 
+        whitelist_count = len(config.get("whitelist_igns", []))
         lines = [
             f"🆔 **Guild ID:** `{config.get('guild_id') or 'chưa cấu hình'}`",
             f"🌍 **Region:** `{config.get('region') or 'Asia'}`",
             f"🤖 **Tự động gỡ role:** `{'✅ Bật' if config.get('auto_strip_enabled') else '❌ Tắt'}`",
             f"📢 **Kênh log:** {log_channel_obj.mention if log_channel_obj else '`chưa cấu hình`'}",
             f"🏷️ **Role mặc định (Khách):** {guest_role_obj.mention if guest_role_obj else '`chưa cấu hình`'}",
+            f"🛡️ **Whitelist IGN (bỏ qua khi audit):** `{whitelist_count}` IGN (xem bằng `/guildwhitelist list`)",
         ]
         await interaction.edit_original_response(content="✅ **Cấu hình GuildCheck hiện tại:**\n" + "\n".join(lines) + role_warning)
 
@@ -687,6 +775,76 @@ class GuildCheckCog(commands.Cog):
             )
 
         await interaction.followup.send(embed=embed)
+
+    # --------------------------------------------------------------------------
+    # LỆNH /guildwhitelist
+    # --------------------------------------------------------------------------
+    @app_commands.command(name="guildwhitelist", description="Quản lý danh sách IGN bỏ qua trong báo cáo /guildaudit (Officer only)")
+    @app_commands.describe(
+        action="Hành động: xem danh sách, thêm IGN hoặc xóa IGN",
+        ign="Tên nhân vật (IGN) cần thêm hoặc xóa khỏi whitelist"
+    )
+    @app_commands.choices(action=[
+        app_commands.Choice(name="📋 Xem danh sách (list)", value="list"),
+        app_commands.Choice(name="➕ Thêm IGN (add)", value="add"),
+        app_commands.Choice(name="➖ Xóa IGN (remove)", value="remove"),
+    ])
+    async def guildwhitelist_cmd(self, interaction: discord.Interaction, action: app_commands.Choice[str], ign: str = None):
+        if not is_officer(interaction.user):
+            return await interaction.response.send_message("❌ Bạn không có quyền Officer!", ephemeral=True)
+        await interaction.response.defer(ephemeral=False)
+
+        async with self._config_lock:
+            try:
+                config = await load_guildcheck_config()
+            except Exception as e:
+                return await interaction.followup.send(f"❌ Không thể đọc cấu hình: `{e}`", ephemeral=False)
+
+            whitelist = [str(x).strip() for x in config.get("whitelist_igns", []) if str(x).strip()]
+
+            if action.value == "list":
+                if not whitelist:
+                    return await interaction.followup.send("📭 Danh sách Whitelist IGN hiện đang trống.", ephemeral=False)
+                lines = [f"`#{i:02d}` **{item}**" for i, item in enumerate(sorted(whitelist, key=lambda s: s.lower()), 1)]
+                embed = discord.Embed(
+                    title=f"🛡️ Danh Sách Whitelist IGN ({len(whitelist)} người)",
+                    description="Các IGN dưới đây sẽ được **bỏ qua**, không bị báo chưa khớp trong `/guildaudit`:\n\n" + "\n".join(lines),
+                    color=0x3498db
+                )
+                return await interaction.followup.send(embed=embed, ephemeral=False)
+
+            if not ign or not ign.strip():
+                return await interaction.followup.send("❌ Vui lòng nhập tham số `ign` để thực hiện hành động này!", ephemeral=False)
+
+            clean_ign = ign.strip()
+            clean_lower = clean_ign.lower()
+
+            if action.value == "add":
+                if any(x.lower() == clean_lower for x in whitelist):
+                    return await interaction.followup.send(f"⚠️ IGN **`{clean_ign}`** đã có sẵn trong Whitelist!", ephemeral=False)
+                whitelist.append(clean_ign)
+                config["whitelist_igns"] = whitelist
+                try:
+                    await save_guildcheck_config(config)
+                except Exception as e:
+                    return await interaction.followup.send(f"❌ Lỗi khi lưu cấu hình: `{e}`", ephemeral=False)
+                return await interaction.followup.send(f"✅ Đã thêm **`{clean_ign}`** vào Whitelist. Nhân vật này sẽ không bị hiện trong `/guildaudit` nữa.", ephemeral=False)
+
+            if action.value == "remove":
+                found = None
+                for x in whitelist:
+                    if x.lower() == clean_lower:
+                        found = x
+                        break
+                if not found:
+                    return await interaction.followup.send(f"❌ Không tìm thấy IGN **`{clean_ign}`** trong Whitelist!", ephemeral=False)
+                whitelist.remove(found)
+                config["whitelist_igns"] = whitelist
+                try:
+                    await save_guildcheck_config(config)
+                except Exception as e:
+                    return await interaction.followup.send(f"❌ Lỗi khi lưu cấu hình: `{e}`", ephemeral=False)
+                return await interaction.followup.send(f"✅ Đã xóa **`{found}`** khỏi Whitelist.", ephemeral=False)
 
     # --------------------------------------------------------------------------
     # LỆNH /registertnc
@@ -841,27 +999,8 @@ class GuildCheckCog(commands.Cog):
         if not rows:
             return await interaction.followup.send("📭 Chưa có thành viên nào đăng ký IGN.", ephemeral=False)
 
-        lines = []
-        for i, row in enumerate(rows, 1):
-            discord_id = row.get("discord_id", "?")
-            ign = row.get("ign", "?")
-            region = row.get("region", "?")
-            registered_by = row.get("registered_by")
-            by_part = f" _(Officer: <@{registered_by}>)_" if registered_by else ""
-            lines.append(f"`{i:03d}` <@{discord_id}> → **{ign}** `[{region}]`{by_part}")
-
-        # Phân trang đơn giản: gửi từng chunk 20 người
-        chunk_size = 20
-        chunks = [lines[i:i + chunk_size] for i in range(0, len(lines), chunk_size)]
-        for idx, chunk in enumerate(chunks):
-            embed = discord.Embed(
-                title=f"📋 Danh Sách Đăng Ký IGN ({len(rows)} thành viên)",
-                description="\n".join(chunk),
-                color=0x3498db,
-            )
-            if len(chunks) > 1:
-                embed.set_footer(text=f"Trang {idx + 1}/{len(chunks)}")
-            await interaction.followup.send(embed=embed)
+        view = RegisterListPaginationView(author=interaction.user, rows=rows)
+        await interaction.followup.send(embed=view.get_embed(), view=view)
 
     # --------------------------------------------------------------------------
     # LỆNH /forcestrip
@@ -1149,6 +1288,20 @@ class GuildCheckCog(commands.Cog):
                     break
 
         unmatched_ingame = [orig for lower, orig in ingame_map.items() if orig not in matched_ingame]
+
+        # Lọc bỏ các IGN nằm trong Whitelist (acc phụ, bot, người được miễn kiểm tra)
+        whitelist_raw = config.get("whitelist_igns", [])
+        whitelist_set = {str(x).strip().lower() for x in whitelist_raw if str(x).strip()}
+        whitelisted_count = 0
+        if whitelist_set:
+            filtered_unmatched = []
+            for ign in unmatched_ingame:
+                if ign.lower() in whitelist_set:
+                    whitelisted_count += 1
+                else:
+                    filtered_unmatched.append(ign)
+            unmatched_ingame = filtered_unmatched
+
         unmatched_ingame.sort()
 
         report_lines = [
@@ -1195,6 +1348,9 @@ class GuildCheckCog(commands.Cog):
             value=f"**{len(unmatched_ingame)}** TV (Xem chi tiết trong file đính kèm)",
             inline=False
         )
+
+        if whitelisted_count > 0:
+            embed.add_field(name="🛡️ Đã Whitelist (Bỏ qua)", value=f"**{whitelisted_count}** TV", inline=True)
 
         sample_unmatched = unmatched_ingame[:15]
         if sample_unmatched:
