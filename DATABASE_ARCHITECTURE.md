@@ -44,11 +44,21 @@ UnbelievaBoat PATCH là phép đổi balance bên ngoài transaction PostgreSQL.
 
 Ledger giữ `pending`/`unknown` hoặc `reverting`/`refund_unknown` khi chưa xác minh; record cũ không mặc định đã trả tiền. `scripts/corebank_reconcile.py` yêu cầu credit key, quyết định, actor và bằng chứng; legacy cần bổ sung guild, recipient, emoji key, tên và display snapshot. DB lưu actor/evidence/timestamp. Helper chỉ ghi kết quả đã kiểm chứng, không gọi bank API và không suy ra kết quả từ balance hiện tại.
 
+Đánh dấu `not_paid` cho `pending` yêu cầu `--worker-stopped`: operator phải thực sự dừng worker
+và kiểm tra provider trước; cờ chỉ ghi nhận xác nhận, không tự dừng bot. Không dùng tuổi row để suy
+ra request đã kết thúc. Khoản `unknown`/`refund_unknown` không được tự gửi lại.
+
 ## SP transaction và autosave
 
 SP import parse các dòng hợp lệ, không phụ thuộc thứ tự file. RPC lock watermark, cộng delta, ghi history và tiến watermark trong cùng transaction; failure rollback toàn bộ. Các lệnh chỉnh/reset điểm dùng cùng lock, không upsert whole snapshot cũ đè import concurrent.
 
-Dashboard PATCH chỉ gửi field thay đổi. Core emoji map dùng atomic per-key mutation; thay hai key khác nhau không mất nhau. Token không có trong PATCH nghĩa là giữ token đang lưu. UI serialize edits cùng page; persist thành công nhưng reload lỗi vẫn giữ trạng thái DB đã lưu và hiển thị chưa áp dụng.
+Export SP phải đầy đủ theo từng giây. Tại giây watermark, RPC đối soát số lần xuất hiện theo
+player/reason/amount; nhóm legacy thiếu reason đối soát tổng count theo player/amount. Các dòng
+giống hệt vẫn được giữ đúng multiplicity, không thu gọn thành một hash. Reset giữ watermark và
+history; snapshot có totals phải kèm timestamp thật và commit cùng transaction. Không chữa các
+history row cũ tự động, không bảo đảm file bị cắt/sửa hoặc backfill trước watermark.
+
+Dashboard PATCH chỉ gửi field thay đổi. Core emoji map dùng atomic per-key mutation; thay hai key khác nhau không mất nhau. Token không có trong PATCH nghĩa là giữ token đang lưu. Editor chỉ mở sau khi GET config thành công; queue autosave tồn tại xuyên unmount/remount trong cùng tab và GET chờ queue drain. Persist thành công nhưng reload lỗi vẫn giữ trạng thái DB đã lưu và hiển thị chưa áp dụng.
 
 ## Reload và health
 

@@ -171,3 +171,11 @@ def test_blacklist_database_failure_is_not_reported_as_empty(monkeypatch):
         assert messages and "Không đọc được" in messages[0]
         assert "trống" not in messages[0]
     asyncio.run(exercise())
+
+
+def test_tts_real_provider_constructor_supports_timeout(tmp_path, monkeypatch):
+    monkeypatch.setattr(alo_tts, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(alo_tts.gTTS, "save", lambda self, path: Path(path).write_bytes(b"audio"))
+    path = Path(alo_tts.generate_tts_file("xin chào"))
+    assert path.read_bytes() == b"audio"
+    path.unlink()
