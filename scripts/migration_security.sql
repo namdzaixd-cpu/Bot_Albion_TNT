@@ -7,7 +7,7 @@ BEGIN
         'guild_config', 'ai_config', 'user_activity', 'user_economy',
         'sp_metadata', 'sp_transactions', 'alo_tts_config', 'json_storage',
         'corebank_config', 'core_credited', 'blacklist', 'discord_channels',
-        'discord_roles', 'system_logs', 'chat_history'
+        'discord_roles', 'system_logs', 'chat_history', 'member_registry'
     ] LOOP
         EXECUTE format('ALTER TABLE public.%I ENABLE ROW LEVEL SECURITY', table_name);
         EXECUTE format('REVOKE ALL ON TABLE public.%I FROM PUBLIC, anon, authenticated', table_name);

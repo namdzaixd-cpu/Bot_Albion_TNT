@@ -28,6 +28,7 @@ Không còn `core.database` forwarding shim hoặc GitHub JSON-sync startup stub
 | `user_activity` | LastSeen; flush lỗi giữ dirty để retry. |
 | `alo_tts_config` | Cấu hình TTS. Queue runtime được gắn channel/session nguồn. |
 | `json_storage` | Party/template, GuildCheck, translator mapping và heartbeat theo file-name key. |
+| `member_registry` | Liên kết IGN ↔ Discord cho auto-strip; RLS và table grants chỉ cho backend. |
 | `discord_channels`, `discord_roles` | Danh mục Discord được Sync cập nhật. |
 | `system_logs` | Log bot; Overview/API logs đọc bảng này, không đọc bảng `logs` cũ. |
 | `blacklist` | `source_guild_id` tham chiếu guild; actor lấy từ session server-side. |
