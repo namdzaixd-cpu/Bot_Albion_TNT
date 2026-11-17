@@ -434,3 +434,55 @@ def test_registerlist_pages_fit_budget_with_max_ign_and_junk_ids():
         seen += embed.fields[0].value.count("`#")
     assert seen == 200  # mọi dòng đều xuất hiện đúng một lần qua các trang
     assert view.total_pages > 200 // 15  # số trang theo ký tự, không theo số dòng cố định
+
+
+def test_forcestrip_waits_for_watcher_so_retry_snapshot_is_not_lost():
+    async def run():
+        bot = mock.Mock()
+        bot.get_guild.return_value = mock.Mock()
+        cog = guildcheck.GuildCheckCog(bot)
+        interaction = _forcestrip_interaction()
+        store = {"guild_id": "g1", "region": "Asia", "updated_at": "old", "members": {"keep": "K"}}
+        gate, entered = asyncio.Event(), asyncio.Event()
+        order = []
+
+        async def slow_load():
+            entered.set()
+            old = dict(store)
+            await gate.wait()  # watcher giữ snapshot cũ khi forcestrip chạy
+            return old
+
+        async def save(data):
+            order.append(("save", sorted(data["members"])))
+            store.update(data)
+
+        strip = mock.AsyncMock(return_value=guildcheck.STRIP_RETRY)
+        config = {"guild_id": "g1", "region": "Asia", "auto_strip_enabled": True, "guest_role_id": "", "log_channel_id": ""}
+        rows = [{"player_id": "bad", "ign": "Failed", "discord_id": "2"}]
+        with (
+            mock.patch.object(guildcheck, "is_officer", return_value=True),
+            mock.patch.object(guildcheck, "load_guildcheck_config", new=mock.AsyncMock(return_value=config)),
+            mock.patch.object(guildcheck, "albion_get_guild_members", new=mock.AsyncMock(return_value=[{"Id": "keep", "Name": "K"}])),
+            mock.patch.object(guildcheck, "load_guildcheck_snapshot", new=slow_load),
+            mock.patch.object(guildcheck, "save_guildcheck_snapshot", new=mock.AsyncMock(side_effect=save)),
+            mock.patch.object(guildcheck, "registry_get_all", new=mock.AsyncMock(return_value=rows)),
+            mock.patch.object(guildcheck, "albion_get_player_by_id", new=mock.AsyncMock(return_value={"GuildId": "o", "GuildName": "G"})),
+            mock.patch.object(guildcheck, "albion_search_player", new=mock.AsyncMock(return_value=None)),
+            mock.patch.object(guildcheck.asyncio, "sleep", new=mock.AsyncMock()),
+            mock.patch.object(cog, "_strip_roles", new=strip),
+        ):
+            watcher = asyncio.create_task(cog.guild_leave_watcher.coro(cog))
+            await entered.wait()
+            manual = asyncio.create_task(guildcheck.GuildCheckCog.forcestrip_cmd.callback(cog, interaction))
+            for _ in range(5):
+                await asyncio.sleep(0)
+            strip.assert_not_awaited()  # forcestrip đang chờ lock, không bị bỏ qua
+            assert not manual.done()
+            gate.set()
+            await asyncio.wait_for(asyncio.gather(watcher, manual), 2)
+
+        assert strip.await_count == 1
+        assert "bad" in store["members"]  # retry không bị snapshot cũ của watcher ghi đè
+        assert order[-1][0] == "save" and "bad" in order[-1][1]
+
+    asyncio.run(run())

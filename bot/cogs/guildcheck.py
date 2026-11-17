@@ -1057,6 +1057,11 @@ class GuildCheckCog(commands.Cog):
             return await interaction.response.send_message("❌ Bạn không có quyền Officer!", ephemeral=True)
 
         await interaction.response.defer(ephemeral=False)
+        # Phải đợi watcher (không bỏ qua) để snapshot/retry không bị ghi đè và không strip trùng.
+        async with self._watch_lock:
+            await self._forcestrip_locked(interaction)
+
+    async def _forcestrip_locked(self, interaction: discord.Interaction):
         guild = interaction.guild
         if not guild:
             return await interaction.followup.send("❌ Lệnh này chỉ dùng trong server Discord!", ephemeral=False)
