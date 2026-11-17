@@ -425,6 +425,23 @@ class CoreBankCog(commands.Cog):
         if context is None:
             return
         guild, channel, reactor = context
+        await self._handle_credit(payload, guild, channel, reactor)
+
+    async def _reaction_present(self, channel, message_id, emoji_key, user_id):
+        """True/False from a fresh fetch; None when the current reaction cannot be verified."""
+        try:
+            message = await channel.fetch_message(message_id)
+            for reaction in message.reactions:
+                emoji = reaction.emoji
+                key = emoji if isinstance(emoji, str) else get_reaction_key(emoji)
+                if key == emoji_key:
+                    return any([user.id == user_id async for user in reaction.users()])
+            return False
+        except Exception as exc:
+            print(f"Không xác minh được reaction Core hiện tại: {exc}")
+            return None
+
+    async def _handle_credit(self, payload, guild, channel, reactor, recheck=True):
         emoji_key = get_reaction_key(payload.emoji)
         core_info = self.config.get("emoji_map", {}).get(emoji_key)
         if not core_info:
@@ -463,6 +480,11 @@ class CoreBankCog(commands.Cog):
 
         amount = core_info.get("value")
         if not isinstance(amount, int) or amount <= 0:
+            return
+        # Claim only for a reaction that is still present: a remove event that ran before this
+        # claim existed had nothing to refund. Absent/unverifiable -> no ledger row, no payment.
+        # A removal after this read is caught by the post-credit re-check below.
+        if await self._reaction_present(channel, payload.message_id, emoji_key, reactor.id) is not True:
             return
         credit_key = f"{payload.message_id}:{emoji_key}"
         snapshot = {
@@ -536,6 +558,9 @@ class CoreBankCog(commands.Cog):
             f"_Ghi nhận bởi {reactor.mention}_",
             reference=message,
         )
+        # A remove event during the in-flight credit saw `pending` and could not refund.
+        if recheck and await self._reaction_present(channel, payload.message_id, emoji_key, reactor.id) is False:
+            await self._handle_refund(payload, guild, channel, reactor, recheck=False)
 
     @commands.Cog.listener()
     async def on_raw_reaction_remove(self, payload: discord.RawReactionActionEvent):
@@ -543,7 +568,11 @@ class CoreBankCog(commands.Cog):
         if context is None:
             return
         guild, channel, reactor = context
-        credit_key = f"{payload.message_id}:{get_reaction_key(payload.emoji)}"
+        await self._handle_refund(payload, guild, channel, reactor)
+
+    async def _handle_refund(self, payload, guild, channel, reactor, recheck=True):
+        emoji_key = get_reaction_key(payload.emoji)
+        credit_key = f"{payload.message_id}:{emoji_key}"
         response, error = await async_execute(
             lambda client: client.table("core_credited")
             .select("*")
@@ -558,6 +587,8 @@ class CoreBankCog(commands.Cog):
             return
         entry = rows[0]
         amount = entry.get("amount")
+        # `pending` is skipped on purpose: the credit handler re-checks the reaction after it
+        # records `credited` and refunds then.
         if (
             entry.get("status") != "credited"
             or not entry.get("recipient_id")
@@ -630,6 +661,9 @@ class CoreBankCog(commands.Cog):
                 f"_Gỡ bởi {reactor.mention}_",
                 reference=message,
             )
+        # Re-added while the refund was in flight: the claim saw `reverting` and was ignored.
+        if recheck and await self._reaction_present(channel, payload.message_id, emoji_key, reactor.id) is True:
+            await self._handle_credit(payload, guild, channel, reactor, recheck=False)
 
 
 async def setup(bot: commands.Bot):
