@@ -9,19 +9,33 @@ export default function SiphonedDashboard() {
   const [searchTerm, setSearchTerm] = useState("");
   const [sortOrder, setSortOrder] = useState<"desc" | "asc">("desc");
 
+  const [loadState, setLoadState] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [attempt, setAttempt] = useState(0);
+
   useEffect(() => {
+    let alive = true;
     fetch('/api/siphoned')
-      .then(res => res.json())
-      .then(data => {
-        if (data.leaderboard) {
-          setLeaderboard(data.leaderboard);
-        }
-        if (data.last_update) {
-          setLastUpdate(data.last_update);
-        }
+      .then(async res => {
+        const data = await res.json().catch(() => null);
+        if (!res.ok || !data || data.error || !Array.isArray(data.leaderboard)) throw new Error('load failed');
+        return data;
       })
-      .catch(err => console.error("Lỗi lấy dữ liệu Siphoned:", err));
-  }, []);
+      .then(data => {
+        if (!alive) return;
+        setLeaderboard(data.leaderboard);
+        setLastUpdate(data.last_update || "Chưa có dữ liệu");
+        setLoadState('ready');
+      })
+      .catch(() => {
+        if (alive) setLoadState('error');
+      });
+    return () => { alive = false; };
+  }, [attempt]);
+
+  const retryLoad = () => {
+    setLoadState('loading');
+    setAttempt(value => value + 1);
+  };
 
   const filteredAndSorted = useMemo(() => {
     let result = leaderboard.filter(entry => 
@@ -53,6 +67,19 @@ export default function SiphonedDashboard() {
         </div>
       </div>
 
+      {loadState !== 'ready' ? (
+        <div role={loadState === 'error' ? 'alert' : 'status'} aria-busy={loadState === 'loading'} className="bg-surface border border-border rounded-xl p-5 shadow-sm text-sm text-text-muted flex items-center justify-between gap-4">
+          {loadState === 'loading' ? (
+            <span>Đang tải dữ liệu Siphoned...</span>
+          ) : (
+            <>
+              <span className="text-red-400">Không tải được dữ liệu Siphoned.</span>
+              <button onClick={retryLoad} className="px-3 py-1.5 rounded-lg border border-border text-white hover:bg-surface-hover">Thử lại</button>
+            </>
+          )}
+        </div>
+      ) : (
+      <>
       {/* Tổng Quan */}
       <div className="grid grid-cols-2 gap-4 mb-6">
         <div className="bg-surface border border-border rounded-xl p-5 shadow-sm flex items-center justify-between">
@@ -157,6 +184,8 @@ export default function SiphonedDashboard() {
           </table>
         </div>
       </div>
+      </>
+      )}
     </div>
   );
 }

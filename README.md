@@ -117,7 +117,7 @@ chạy đều import được module ở thư mục gốc (như `test_api_key/`)
 Kiểm tra tài chính trong `test_finance_round2.py` tự tạo PostgreSQL tạm trên Unix socket,
 không dùng `DATABASE_URL` thật. Cần `initdb`/`pg_ctl` trên PATH; CI thêm chúng qua `pg_config --bindir`.
 
-Dashboard (Node 22+ và Chrome cho browser tests):
+Dashboard (Node 22.18+ và Chrome cho browser tests):
 
 ```bash
 cd web_dashboard
