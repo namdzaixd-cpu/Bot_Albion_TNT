@@ -307,7 +307,7 @@ def _run(coro):
     return asyncio.run(coro)
 
 
-def test_core_remove_during_pending_is_refunded_after_credit(pg, monkeypatch):
+def test_core_remove_during_pending_waits_in_order_then_refunds(pg, monkeypatch):
     async def scenario():
         h = Harness(pg, monkeypatch)
         h.react()
@@ -316,10 +316,11 @@ def test_core_remove_during_pending_is_refunded_after_credit(pg, monkeypatch):
         await h.started.wait()
         assert h.ledger()["status"] == "pending"
         h.unreact()
-        await h.cog.on_raw_reaction_remove(h.payload)  # sees pending: must not touch the provider
-        assert h.provider_calls == [100]
+        remove = asyncio.create_task(h.cog.on_raw_reaction_remove(h.payload))
+        await asyncio.sleep(0.05)
+        assert h.provider_calls == [100]  # the remove event is queued behind the in-flight credit
         h.gate.set()
-        await credit
+        await asyncio.gather(credit, remove)
         return h
 
     h = _run(scenario())
@@ -373,10 +374,11 @@ def test_core_readd_while_refund_in_flight_is_credited_after_revert(pg, monkeypa
         await h.started.wait()
         assert h.ledger()["status"] == "reverting"
         h.react()
-        await h.cog.on_raw_reaction_add(h.payload)  # claim refused: refund still in flight
+        readd = asyncio.create_task(h.cog.on_raw_reaction_add(h.payload))
+        await asyncio.sleep(0.05)
         assert h.provider_calls == [100, -100]
         h.gate.set()
-        await refund
+        await asyncio.gather(refund, readd)
         return h
 
     h = _run(scenario())
@@ -454,3 +456,61 @@ def test_core_flapping_reaction_events_terminate_with_bounded_provider_calls(pg,
     h = _run(scenario())
     assert h.provider_calls == [100, -100]
     assert h.ledger()["status"] == "reverted"
+
+
+def test_core_triple_flip_during_pending_converges_with_reaction_present(pg, monkeypatch):
+    async def scenario():
+        h = Harness(pg, monkeypatch)
+        h.react()
+        h.gate = asyncio.Event()
+        e1 = asyncio.create_task(h.cog.on_raw_reaction_add(h.payload))
+        await h.started.wait()
+        h.unreact()
+        e2 = asyncio.create_task(h.cog.on_raw_reaction_remove(h.payload))
+        h.react()
+        e3 = asyncio.create_task(h.cog.on_raw_reaction_add(h.payload))
+        await asyncio.sleep(0.05)
+        h.gate.set()
+        await asyncio.gather(e1, e2, e3)
+        return h
+
+    h = _run(scenario())
+    assert 789 in h.reactors
+    assert h.ledger()["status"] == "credited"
+    assert sum(h.provider_calls) == 100
+
+
+def test_core_triple_flip_during_refund_converges_in_both_end_states(pg, monkeypatch):
+    async def scenario(end_present):
+        h = Harness(pg, monkeypatch)
+        h.react()
+        await h.cog.on_raw_reaction_add(h.payload)
+        h.unreact()
+        h.gate = asyncio.Event()
+        h.started.clear()
+        e1 = asyncio.create_task(h.cog.on_raw_reaction_remove(h.payload))
+        await h.started.wait()
+        assert h.ledger()["status"] == "reverting"
+        h.react()
+        e2 = asyncio.create_task(h.cog.on_raw_reaction_add(h.payload))
+        if end_present:
+            h.unreact()
+            e3 = asyncio.create_task(h.cog.on_raw_reaction_remove(h.payload))
+            h.react()
+            e4 = asyncio.create_task(h.cog.on_raw_reaction_add(h.payload))
+            tasks = (e1, e2, e3, e4)
+        else:
+            h.unreact()
+            tasks = (e1, e2, asyncio.create_task(h.cog.on_raw_reaction_remove(h.payload)))
+        await asyncio.sleep(0.05)
+        h.gate.set()
+        await asyncio.gather(*tasks)
+        return h
+
+    present = _run(scenario(True))
+    assert 789 in present.reactors and present.ledger()["status"] == "credited"
+    assert sum(present.provider_calls) == 100
+    pg.conn.execute("DELETE FROM core_credited")
+    absent = _run(scenario(False))
+    assert 789 not in absent.reactors and absent.ledger()["status"] == "reverted"
+    assert sum(absent.provider_calls) == 0

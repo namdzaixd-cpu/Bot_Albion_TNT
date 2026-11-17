@@ -1,4 +1,6 @@
+import asyncio
 import re
+import weakref
 import aiohttp
 
 import discord
@@ -51,6 +53,16 @@ class CoreBankCog(commands.Cog):
         self.bot = bot
         self.config = self._default_config()
         self.config_loaded = False
+        # Gateway add/remove events for one credit are processed strictly in order; the weak
+        # values drop a lock once no handler uses it.
+        self._credit_locks = weakref.WeakValueDictionary()
+
+    def _credit_lock(self, payload) -> asyncio.Lock:
+        key = f"{payload.message_id}:{get_reaction_key(payload.emoji)}"
+        lock = self._credit_locks.get(key)
+        if lock is None:
+            lock = self._credit_locks[key] = asyncio.Lock()
+        return lock
 
     @staticmethod
     def _default_config():
@@ -425,7 +437,8 @@ class CoreBankCog(commands.Cog):
         if context is None:
             return
         guild, channel, reactor = context
-        await self._handle_credit(payload, guild, channel, reactor)
+        async with self._credit_lock(payload):
+            await self._handle_credit(payload, guild, channel, reactor)
 
     async def _reaction_present(self, channel, message_id, emoji_key, user_id):
         """True/False from a fresh fetch; None when the current reaction cannot be verified."""
@@ -568,7 +581,8 @@ class CoreBankCog(commands.Cog):
         if context is None:
             return
         guild, channel, reactor = context
-        await self._handle_refund(payload, guild, channel, reactor)
+        async with self._credit_lock(payload):
+            await self._handle_refund(payload, guild, channel, reactor)
 
     async def _handle_refund(self, payload, guild, channel, reactor, recheck=True):
         emoji_key = get_reaction_key(payload.emoji)

@@ -80,7 +80,8 @@ BEGIN
             player := NULLIF(btrim(item->>'player_name'), '');
             delta := NULLIF(item->>'amount', '')::integer;
             row_ts := NULLIF(item->>'log_timestamp', '')::timestamp without time zone;
-            reason_text := COALESCE(btrim(item->>'reason'), '');
+            -- A missing/blank reason (older bot, pre-migration export) is stored as NULL = legacy wildcard.
+            reason_text := NULLIF(btrim(item->>'reason'), '');
         EXCEPTION WHEN OTHERS THEN
             skipped_count := skipped_count + 1;
             CONTINUE;
@@ -127,7 +128,7 @@ BEGIN
                 -- A group holding legacy rows (reason NULL) cannot attribute them to a reason, so it
                 -- dedupes by group total (same player/amount/second, so balances are unaffected by
                 -- attribution); every other group dedupes per reason identity.
-                IF (base_counts->>('legacy:' || group_key))::integer > 0 THEN
+                IF (base_counts->>('legacy:' || group_key))::integer > 0 OR reason_text IS NULL THEN
                     identity := group_key;
                 END IF;
                 seen_n := COALESCE((seen_counts->>identity)::integer, 0) + 1;

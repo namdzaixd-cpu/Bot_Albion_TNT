@@ -348,6 +348,43 @@ BEGIN
 END;
 $$;
 
+-- migration-first rollout: an old bot (no reason) followed by the new bot must not double-count
+DO $$
+DECLARE
+    result jsonb;
+    t text := '2026-03-01 00:00:00';
+    old_row jsonb := jsonb_build_object('player_name', 'A', 'amount', 10, 'log_timestamp', t);
+    new_row jsonb := jsonb_build_object('player_name', 'A', 'amount', 10, 'log_timestamp', t, 'reason', 'Deposit');
+BEGIN
+    DELETE FROM public.sp_transactions; DELETE FROM public.user_economy; DELETE FROM public.sp_metadata;
+    SET LOCAL ROLE service_role;
+    PERFORM public.apply_siphoned_import(jsonb_build_array(old_row, old_row));
+    IF (SELECT count(*) FROM public.sp_transactions WHERE reason IS NULL) <> 2 THEN
+        RAISE EXCEPTION 'missing reason was not stored as NULL';
+    END IF;
+    result := public.apply_siphoned_import(jsonb_build_array(new_row, new_row));
+    IF (result->>'applied')::int <> 0 THEN RAISE EXCEPTION 'old-format rows re-applied: %', result; END IF;
+    result := public.apply_siphoned_import(jsonb_build_array(
+        new_row, new_row, jsonb_build_object('player_name', 'A', 'amount', 10, 'log_timestamp', t, 'reason', 'Other')));
+    IF (result->>'applied')::int <> 1 THEN RAISE EXCEPTION 'supplemental reason wrong: %', result; END IF;
+    result := public.apply_siphoned_import(jsonb_build_array(
+        new_row, new_row, jsonb_build_object('player_name', 'A', 'amount', 10, 'log_timestamp', t, 'reason', 'Other')));
+    IF (result->>'applied')::int <> 0
+       OR (SELECT silver_pieces FROM public.user_economy WHERE user_id = 'A') <> 30 THEN
+        RAISE EXCEPTION 'replay doubled balances: %', result;
+    END IF;
+    -- blank reason is also NULL; a non-empty reason is preserved
+    PERFORM public.apply_siphoned_import(jsonb_build_array(
+        jsonb_build_object('player_name', 'B', 'amount', 1, 'log_timestamp', '2026-03-02 00:00:00', 'reason', '  '),
+        jsonb_build_object('player_name', 'B', 'amount', 1, 'log_timestamp', '2026-03-02 00:00:01', 'reason', 'Deposit')));
+    IF (SELECT count(*) FROM public.sp_transactions WHERE player_name = 'B' AND reason IS NULL) <> 1
+       OR (SELECT count(*) FROM public.sp_transactions WHERE player_name = 'B' AND reason = 'Deposit') <> 1 THEN
+        RAISE EXCEPTION 'blank/non-empty reason storage wrong';
+    END IF;
+    RESET ROLE;
+END;
+$$;
+
 -- >1000 players aggregate without truncation; window uses log time (UTC)
 DO $$
 DECLARE
