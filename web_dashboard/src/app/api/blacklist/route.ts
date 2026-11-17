@@ -4,6 +4,7 @@ import { supabase } from "@/lib/supabaseServer";
 import { getServerSession } from "next-auth/next";
 import { authOptions, isAdmin } from "@/lib/auth";
 import { GUILD_ID } from "@/lib/guild";
+import { fetchAllRows } from "@/lib/fetchAllRows";
 
 function authorizeAdmin(session: Session | null) {
   if (!session?.user) {
@@ -21,15 +22,18 @@ export async function GET() {
     return NextResponse.json({ error: "Chưa đăng nhập" }, { status: 401 });
   }
   try {
-    const { data, error } = await supabase
-      .from("blacklist")
-      .select("*")
-      .order("timestamp", { ascending: false });
-
-    if (error) {
-      return NextResponse.json({ error: "Không thể tải blacklist." }, { status: 500 });
-    }
-    return NextResponse.json(data || []);
+    const data = await fetchAllRows<{ discord_id: string; timestamp: string | null }>((from, to) =>
+      supabase
+        .from("blacklist")
+        .select("*", { count: "exact" })
+        .order("discord_id", { ascending: true })
+        .range(from, to)
+    );
+    data.sort((left, right) =>
+      String(right.timestamp ?? "").localeCompare(String(left.timestamp ?? "")) ||
+      String(left.discord_id).localeCompare(String(right.discord_id))
+    );
+    return NextResponse.json(data);
   } catch {
     return NextResponse.json({ error: "Không thể tải blacklist." }, { status: 500 });
   }

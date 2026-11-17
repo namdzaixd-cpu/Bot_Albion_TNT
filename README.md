@@ -54,6 +54,23 @@ SP/CoreBank/LastSeen/config ở các bảng chuyên biệt. `bot/Storage/` là l
   không tự retry API ngoài khi có khả năng đã cộng/trừ tiền.
 - Chi tiết schema, migration và rollout: [DATABASE_ARCHITECTURE.md](DATABASE_ARCHITECTURE.md).
 
+### Sửa lỗi review vòng hai
+
+- File SP phải là export gốc, đầy đủ theo từng giây; không bảo đảm chống trùng cho file bị cắt/sửa thủ công.
+- Migration mới chỉ thay đổi schema/hành vi về sau; không tự sửa điểm hoặc lịch sử cũ đã sai.
+- Onboarding chỉ hoàn tất sau khi cấp role thành công; CTA và nút duyệt được phục hồi sau restart.
+- Dashboard chỉ cho sửa sau khi tải cấu hình thành công; các lần autosave được tuần tự hóa xuyên chuyển module.
+- Translator cho thử lại khi lỗi và không báo đã dịch nếu thiếu bản dịch; TTS có timeout và dọn audio tạm.
+- `/blacklist add` nhận lý do tối đa 500 ký tự; danh sách legacy dài được chia nhiều embed thay vì mất kết quả.
+- Sau merge vẫn phải backup và apply migration có chủ đích trước deploy. PR không tự đổi DB production.
+
+Migration tài chính mới: `scripts/migrations/20261117_financial_integrity.sql`, chạy qua
+`scripts/apply_schema.py` để áp dụng đúng thứ tự cùng hardening. Reset SP giữ lịch sử và mốc import;
+snapshot SP được nhập totals + mốc trong một transaction và từ chối target đã có dữ liệu.
+CoreBank không tự gửi lại khoản chưa rõ kết quả. Chỉ dùng `corebank_reconcile.py --worker-stopped`
+cho khoản `pending` sau khi thực sự dừng worker và đối soát provider; cờ này là xác nhận của operator,
+không phải lệnh dừng bot. Không suy ra việc chưa thanh toán chỉ từ tuổi của ledger row.
+
 ## Triển khai bot
 
 ```bash
@@ -96,6 +113,21 @@ pytest bot/tests -v
 
 CI chạy `pytest tests -v` từ `bot/`. `pytest.ini` cấu hình `pythonpath = . bot` để cả hai cách
 chạy đều import được module ở thư mục gốc (như `test_api_key/`) và trong `bot/`.
+
+Kiểm tra tài chính trong `test_finance_round2.py` tự tạo PostgreSQL tạm trên Unix socket,
+không dùng `DATABASE_URL` thật. Cần `initdb`/`pg_ctl` trên PATH; CI thêm chúng qua `pg_config --bindir`.
+
+Dashboard (Node 22.18+ và Chrome cho browser tests):
+
+```bash
+cd web_dashboard
+node --test tests/clientSaveQueue.test.mjs
+node --test tests/ui/config-pages.test.mjs
+npx tsc --noEmit --incremental false
+```
+
+Đặt `CHROME_PATH` nếu Chrome không ở đường dẫn mặc định macOS. Browser harness chỉ sao chép UI
+sang app tạm, không sao chép `.env`, API routes hay proxy; API được trả bằng fixture trong test.
 
 ## Lưu ý bảo mật
 

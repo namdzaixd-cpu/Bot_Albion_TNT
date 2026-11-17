@@ -1,5 +1,5 @@
 import io
-from datetime import datetime, timezone, timedelta
+from datetime import datetime
 
 import aiohttp
 import discord
@@ -42,6 +42,7 @@ def parse_sp_log(text: str) -> tuple[list[dict], int]:
             "player_name": player,
             "amount": amount,
             "log_timestamp": timestamp.strftime("%Y-%m-%d %H:%M:%S"),
+            "reason": parts[2],
         })
     return rows, invalid
 
@@ -184,7 +185,7 @@ class ResetConfirmView(discord.ui.View):
         self.confirmed = True
         self.stop()
         await interaction.edit_original_response(
-            content="🧹 Toàn bộ bảng xếp hạng điểm Siphoned đã được reset!",
+            content="🧹 Điểm Siphoned đã reset về 0; lịch sử và mốc log được giữ nên file cũ không bị cộng lại.",
             view=None,
         )
     @discord.ui.button(label="❌ Huỷ", style=discord.ButtonStyle.gray)
@@ -204,6 +205,8 @@ class SiphonedCog(commands.Cog):
     # ── /spupdate ──────────────────────────────────────────────────────────────
     @app_commands.command(name="spupdate", description="Cập nhật file log Siphoned (tự kiểm tra ngày tháng)")
     async def spupdate(self, interaction: discord.Interaction, file_log: discord.Attachment):
+        if not is_officer(interaction.user):
+            return await interaction.response.send_message("❌ Bạn không có quyền sử dụng lệnh này!", ephemeral=True)
         await interaction.response.defer()
         if not file_log.filename.lower().endswith(".txt"):
             return await interaction.followup.send("❌ Vui lòng đính kèm tệp văn bản định dạng `.txt`!")
@@ -225,7 +228,10 @@ class SiphonedCog(commands.Cog):
 
         count = int(result.get("applied", 0))
         skipped = invalid + int(result.get("skipped", 0))
-        overlap_note = f"\n⏩ Bỏ qua **{skipped}** dòng cũ/không hợp lệ." if skipped else ""
+        future = int(result.get("future", 0))
+        overlap_note = f"\n⏩ Bỏ qua **{skipped}** dòng cũ/trùng/không hợp lệ." if skipped else ""
+        if future:
+            overlap_note += f"\n⚠️ Từ chối **{future}** dòng có timestamp ở tương lai (không tiến mốc)."
         if count == 0:
             return await interaction.followup.send(
                 f"ℹ️ Không có dòng mới hơn watermark được cộng.{overlap_note}\n"
@@ -291,30 +297,24 @@ class SiphonedCog(commands.Cog):
     ])
     async def sptop(self, interaction: discord.Interaction, period: str):
         await interaction.response.defer()
-        period_map = {"30d": 30, "90d": 90, "6m": 180}
+        period_days = {"30d": 30, "90d": 90, "6m": 180}
         period_label = {"30d": "30 ngày", "90d": "3 tháng", "6m": "6 tháng", "all": "Toàn bộ lịch sử"}
 
-        def build(client):
-            query = client.table("sp_transactions").select("player_name, amount")
-            if period != "all":
-                cutoff = (datetime.now(timezone.utc) - timedelta(days=period_map[period])).isoformat()
-                query = query.gte("inserted_at", cutoff)
-            return query
-
-        response, error = await async_execute(build, retries=1)
+        # Aggregated in SQL by Albion log time (UTC), so no row cap truncates the ranking.
+        response, error = await async_execute(
+            lambda client: client.rpc("sp_period_totals", {"p_days": period_days.get(period)}),
+            retries=1,
+        )
         if error:
             return await interaction.followup.send(f"❌ Lỗi khi truy vấn dữ liệu: {error}")
-        rows = response.data if response and response.data else []
+        rows = _rpc_data(response) or []
         if not rows:
             return await interaction.followup.send(
                 f"📊 Không có dữ liệu trong **{period_label[period]}**.\n"
                 f"*(Lịch sử chỉ có từ khi tính năng này được bật)*"
             )
 
-        totals: dict[str, int] = {}
-        for row in rows:
-            totals[row["player_name"]] = totals.get(row["player_name"], 0) + row["amount"]
-        sorted_data = sorted(totals.items(), key=lambda item: item[1], reverse=True)
+        sorted_data = [(row["player_name"], row["total"]) for row in rows]
         view = SiphonedPaginator(
             sorted_data,
             period_label[period],

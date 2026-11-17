@@ -118,12 +118,17 @@ def test_cog_load_restores_message_bound_approval_view():
     forum = FakeForum()
     bot = mock.Mock()
     bot.get_channel.return_value = forum
+    bot.wait_until_ready = mock.AsyncMock()
     cog = Onboarding(bot)
     cog.config.data = {"apply_channel_id": "456"}
     cog.config.load = mock.AsyncMock(return_value=cog.config.data)
 
+    async def load_and_restore():
+        await cog.cog_load()
+        await cog._restore_task
+
     with mock.patch.object(onboarding_module.discord, "ForumChannel", FakeForum):
-        asyncio.run(cog.cog_load())
+        asyncio.run(load_and_restore())
 
     message_views = [
         call for call in bot.add_view.call_args_list

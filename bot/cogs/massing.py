@@ -437,27 +437,56 @@ def format_role_block(roles, weapon_slots):
     return "\n".join(lines)
 
 
-def build_party_embed(party):
+FIELD_LIMIT = 1024
+EMBED_LIMIT = 6000
+MESSAGE_LIMIT = 2000
+
+
+def _clip(text, limit):
+    text = str(text)
+    return text if len(text) <= limit else text[:limit - 1] + "…"
+
+
+def _mention_lines(uids, budget, prefix=""):
+    """Nối mention tới khi hết budget; phần dư gộp thành '…+N' (state party không bị đụng tới)."""
+    lines, used = [], 0
+    for index, uid in enumerate(uids):
+        line = f"{prefix}<@{uid}>"
+        remaining = len(uids) - index - 1
+        reserve = len(f"\n…+{remaining}") if remaining else 0
+        if used + len(line) + (1 if lines else 0) + reserve > budget:
+            lines.append(f"…+{len(uids) - index}")
+            break
+        used += len(line) + (1 if lines else 0)
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def _build_party_embed(party, budget):
     total_filled = sum(len(members) for wmap in party["slots"].values() for members in wmap.values())
     total_slots = sum(limit for wlist in party["weapon_slots"].values() for _, limit in wlist)
     is_full = total_slots > 0 and total_filled >= total_slots
 
-    embed = discord.Embed(title=party["name"], color=0xe74c3c)
-    embed.add_field(name="🕐 Time", value=party["time"] or "_Chưa rõ_", inline=False)
+    embed = discord.Embed(title=_clip(party["name"], 256), color=0xe74c3c)
+    embed.add_field(name="🕐 Time", value=_clip(party["time"] or "_Chưa rõ_", budget), inline=False)
     embed.add_field(name="​", value="─────────────────", inline=False)
 
     for role in party["roles"]:
         icon = role_icons.get(role, "🔹")
         wlist = party["weapon_slots"][role]
+        block_budget = max(budget // max(len(wlist), 1) - 2, 20)
         lines = []
         for weapon, limit in wlist:
             members = party["slots"][role].get(weapon, [])
-            member_str = "\n".join(f"<@{uid}>" for uid in members) if members else "_Chưa có ai_"
-            if len(wlist) == 1 and wlist[0][0] == role:
-                lines.append(f"**{role}** {len(members)}/{limit}\n{member_str}")
-            else:
-                lines.append(f"**{weapon}** {len(members)}/{limit}\n{member_str}")
-        embed.add_field(name=f"{icon} {role}", value="\n\n".join(lines) if lines else "_Trống_", inline=True)
+            title = role if len(wlist) == 1 and wlist[0][0] == role else weapon
+            header = f"**{_clip(title, 60)}** {len(members)}/{limit}\n"
+            member_str = _mention_lines(members, max(block_budget - len(header), 10)) if members else "_Chưa có ai_"
+            lines.append(header + member_str)
+        embed.add_field(
+            name=_clip(f"{icon} {role}", 256),
+            value=_clip("\n\n".join(lines), budget) if lines else "_Trống_",
+            inline=True,
+        )
 
     if total_slots > 0:
         status = "🟢 **FULL**" if is_full else f"🟡 **{total_filled}/{total_slots}**"
@@ -465,17 +494,30 @@ def build_party_embed(party):
 
     fills = party.get("fills", [])
     if fills:
-        embed.add_field(name=f"🔄 Fill ({len(fills)} người)", value="\n".join(f"• <@{uid}>" for uid in fills), inline=False)
+        embed.add_field(
+            name=f"🔄 Fill ({len(fills)} người)",
+            value=_mention_lines(fills, budget, prefix="• "),
+            inline=False,
+        )
     elif is_full:
         embed.add_field(name="🔄 Fill", value="_Party đã full — bấm nút Fill để vào danh sách dự bị!_", inline=False)
 
     if party.get("note"):
-        embed.add_field(name="📝 Ghi chú", value=party["note"], inline=False)
+        embed.add_field(name="📝 Ghi chú", value=_clip(party["note"], budget), inline=False)
 
     creator_name = party.get("creator_name") or (f"<@{party['creator']}>" if party.get("creator") else None)
     if creator_name:
-        embed.set_footer(text=f"Created by {creator_name}")
+        embed.set_footer(text=_clip(f"Created by {creator_name}", 2048))
 
+    return embed
+
+
+def build_party_embed(party):
+    # Thu nhỏ budget từng field cho tới khi tổng embed <= 6000 ký tự.
+    for budget in (FIELD_LIMIT, 600, 350, 200, 100, 50):
+        embed = _build_party_embed(party, budget)
+        if len(embed) <= EMBED_LIMIT:
+            break
     return embed
 
 
@@ -673,6 +715,7 @@ class PartySlotSelect(discord.ui.Select):
         if not options:
             options.append(discord.SelectOption(label="Không có slot nào", value="none"))
         super().__init__(
+            custom_id=f"slot_{party_id}",
             placeholder="⚔️ Chọn Slot tham gia (Role & Vũ khí)...",
             options=options[:25],
             min_values=1,
@@ -1256,9 +1299,25 @@ class PingAllModal(discord.ui.Modal, title="📢 Ping All Party"):
         self.member_ids = member_ids
 
     async def on_submit(self, interaction: discord.Interaction):
-        mentions = " ".join(f"<@{uid}>" for uid in self.member_ids)
-        content = f"📢 {self.ping_message.value.strip()}\n{mentions}"
-        await interaction.response.send_message(content)
+        text = self.ping_message.value.strip()
+        if not text:
+            return await interaction.response.send_message("❌ Nội dung ping không được để trống.", ephemeral=True)
+        if not self.member_ids:
+            return await interaction.response.send_message("❌ Party chưa có ai để ping.", ephemeral=True)
+        # Chia mention thành nhiều tin để mỗi tin <= 2000 ký tự.
+        chunks, current, sep = [], f"📢 {text}", "\n"
+        for uid in self.member_ids:
+            mention = f"<@{uid}>"
+            if len(current) + len(sep) + len(mention) > MESSAGE_LIMIT:
+                chunks.append(current)
+                current = mention
+            else:
+                current += sep + mention
+            sep = " "
+        chunks.append(current)
+        await interaction.response.send_message(chunks[0])
+        for chunk in chunks[1:]:
+            await interaction.followup.send(chunk)
 
 
 class MassingCog(commands.Cog):

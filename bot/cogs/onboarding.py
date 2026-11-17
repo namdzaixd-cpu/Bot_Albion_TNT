@@ -108,7 +108,8 @@ def check_officer_permission(user: discord.Member, config: 'OnboardConfig' = Non
     return is_officer(user)
 
 
-async def _get_member_or_fetch(guild: discord.Guild, user_id: int):
+async def _get_member_or_fetch(guild: discord.Guild, user_id: int, *, strict: bool = False):
+    """strict=True: NotFound -> None (member left); other errors propagate (transient)."""
     if not guild or not user_id:
         return None
     member = guild.get_member(user_id)
@@ -116,7 +117,11 @@ async def _get_member_or_fetch(guild: discord.Guild, user_id: int):
         return member
     try:
         return await guild.fetch_member(user_id)
+    except discord.NotFound:
+        return None
     except Exception:
+        if strict:
+            raise
         return None
 
 
@@ -671,7 +676,12 @@ class OfficerApprovalView(discord.ui.View):
                 return await interaction.followup.send("✅ Đơn này đã được xử lý.", ephemeral=True)
             target_user_id, ign_name, yob, _ = get_onboard_data(interaction)
             guild = interaction.guild
-            member = await _get_member_or_fetch(guild, target_user_id)
+            try:
+                member = await _get_member_or_fetch(guild, target_user_id, strict=True)
+            except Exception as error:
+                return await interaction.followup.send(
+                    f"⚠️ Không tra cứu được thành viên, đơn vẫn chờ duyệt, thử lại sau: `{error}`", ephemeral=True
+                )
             bot_member = guild.me if guild else None
             if bot_member and member and member.id == bot_member.id:
                 member = None
@@ -679,20 +689,22 @@ class OfficerApprovalView(discord.ui.View):
                 role_id = self.cog.config.member_role_id
                 role = guild.get_role(int(role_id)) if role_id and str(role_id).isdigit() else None
                 if not role_id:
-                    await interaction.followup.send(
-                        "⚠️ Chưa cài đặt Member Role nên bot không thể cấp role. Dùng `/recuibot setup_roles` để cài!",
+                    return await interaction.followup.send(
+                        "⚠️ Chưa cài đặt Member Role nên chưa duyệt đơn. Dùng `/recuibot setup_roles` để cài rồi bấm lại!",
                         ephemeral=True,
                     )
                 elif not role:
-                    await interaction.followup.send(
-                        "⚠️ Role ID đã lưu không tồn tại. Dùng `/recuibot setup_roles` để cài lại!",
+                    return await interaction.followup.send(
+                        "⚠️ Role ID đã lưu không tồn tại nên chưa duyệt đơn. Dùng `/recuibot setup_roles` để cài lại rồi bấm lại!",
                         ephemeral=True,
                     )
                 else:
                     try:
                         await member.add_roles(role)
                     except Exception as error:
-                        await interaction.followup.send(f"⚠️ Không thể cấp role: `{error}`", ephemeral=True)
+                        return await interaction.followup.send(
+                            f"⚠️ Không thể cấp role nên đơn vẫn chờ duyệt, thử lại sau: `{error}`", ephemeral=True
+                        )
             else:
                 await interaction.followup.send(
                     "⚠️ Không tìm thấy thành viên này trong server (có thể họ đã out).", ephemeral=True
@@ -851,6 +863,20 @@ class Onboarding(commands.Cog):
         self.bot.add_view(ApplyLaunchView(self))
         self.bot.add_view(RulesConfirmView(self))
         self.bot.add_view(ApplicantConfirmView(self))
+        # cog_load chạy trong setup_hook, trước khi cache sẵn sàng: quét sau wait_until_ready.
+        self._restore_task = asyncio.create_task(self._restore_application_views())
+
+    async def cog_unload(self):
+        task = getattr(self, "_restore_task", None)
+        if task and not task.done():
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+    async def _restore_application_views(self):
+        await self.bot.wait_until_ready()
         forum_id = self.config.apply_channel_id
         forum = self.bot.get_channel(int(forum_id)) if forum_id and str(forum_id).isdigit() else None
         if not isinstance(forum, discord.ForumChannel):

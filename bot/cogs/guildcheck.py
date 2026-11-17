@@ -178,6 +178,51 @@ async def registry_get_all():
         return []
     return rows.data if hasattr(rows, "data") else []
 
+STRIP_DONE = "done"
+STRIP_SKIPPED = "skipped"  # vĩnh viễn: chưa liên kết hoặc đã rời server, không còn gì để gỡ
+STRIP_RETRY = "retry"  # lỗi tạm thời: giữ registry + snapshot để thử lại
+FIELD_LIMIT = 1024
+
+
+def _clip(text, limit):
+    text = str(text)
+    return text if len(text) <= limit else text[:limit - 1] + "…"
+
+
+def _mention(user_id):
+    """Chỉ dựng mention khi là snowflake hợp lệ; chuỗi rác được cắt ngắn."""
+    text = str(user_id)
+    return f"<@{text}>" if text.isdigit() and len(text) <= 20 else f"`{_clip(text, 20)}`"
+
+
+def _pack_pages(lines, budget=FIELD_LIMIT):
+    pages, current = [], []
+    for line in lines:
+        line = _clip(line, budget)
+        if current and len("\n".join(current + [line])) > budget:
+            pages.append(current)
+            current = []
+        current.append(line)
+    if current:
+        pages.append(current)
+    return pages
+
+
+def _fit_lines(lines, budget=FIELD_LIMIT):
+    """Giữ các dòng đầu trong budget, phần còn lại gộp thành '…và N người khác'."""
+    out, used = [], 0
+    for index, line in enumerate(lines):
+        line = _clip(line, 200)
+        rest = len(lines) - index - 1
+        reserve = len(f"\n_…và {rest} người khác._") if rest else 0
+        if used + len(line) + (1 if out else 0) + reserve > budget:
+            out.append(f"_…và {len(lines) - index} người khác._")
+            break
+        used += len(line) + (1 if out else 0)
+        out.append(line)
+    return "\n".join(out)
+
+
 
 # ==============================================================================
 # VIEW PHÂN TRANG DANH SÁCH THÀNH VIÊN
@@ -279,8 +324,17 @@ class RegisterListPaginationView(discord.ui.View):
         self.author = author
         self.rows = rows
         self.current_page = 0
-        self.per_page = 15
-        self.total_pages = max(1, (len(rows) + self.per_page - 1) // self.per_page)
+        lines = []
+        for i, row in enumerate(rows, start=1):
+            discord_id = row.get("discord_id", "?")
+            registered_by = row.get("registered_by")
+            by_part = f" _(bởi {_mention(registered_by)})_" if registered_by and registered_by != discord_id else ""
+            lines.append(
+                f"`#{i:03d}` {_mention(discord_id)} → **{_clip(row.get('ign', '?'), 40)}** "
+                f"`[{_clip(row.get('region', '?'), 10)}]`{by_part}"
+            )
+        self.pages = _pack_pages(lines)  # theo ngân sách 1024 ký tự/field, không theo số dòng cố định
+        self.total_pages = max(1, len(self.pages))
         self.update_buttons()
 
     def update_buttons(self):
@@ -291,27 +345,16 @@ class RegisterListPaginationView(discord.ui.View):
         self.last_btn.disabled = (self.current_page >= self.total_pages - 1)
 
     def get_embed(self) -> discord.Embed:
-        start_idx = self.current_page * self.per_page
-        end_idx = start_idx + self.per_page
-        page_items = self.rows[start_idx:end_idx]
+        page_lines = self.pages[self.current_page] if self.pages else []
 
         embed = discord.Embed(
             title=f"📋 Danh Sách Thành Viên Đã Đăng Ký IGN ({len(self.rows)} người)",
             description=f"👥 Tổng cộng: **{len(self.rows)}** thành viên đã liên kết Discord ↔ IGN\n───────────────────────────",
             color=0x2ecc71
         )
-        lines = []
-        for i, row in enumerate(page_items, start=start_idx + 1):
-            discord_id = row.get("discord_id", "?")
-            ign = row.get("ign", "?")
-            region = row.get("region", "?")
-            registered_by = row.get("registered_by")
-            by_part = f" _(bởi <@{registered_by}>)_" if registered_by and registered_by != discord_id else ""
-            lines.append(f"`#{i:03d}` <@{discord_id}> → **{ign}** `[{region}]`{by_part}")
-
         embed.add_field(
             name="Danh sách chi tiết",
-            value="\n".join(lines) if lines else "📭 Không có dữ liệu.",
+            value="\n".join(page_lines) if page_lines else "📭 Không có dữ liệu.",
             inline=False
         )
         embed.set_footer(text=f"Trang {self.current_page + 1}/{self.total_pages} • TNC Guild Management")
@@ -528,9 +571,12 @@ class GuildCheckCog(commands.Cog):
                 continue
 
             # Xác nhận đã out guild liên tiếp qua cả 3 vòng kiểm tra → xử lý Discord
-            self._missing_counts.pop(player_id, None)
             current_guild_name = player_info.get("GuildName") or "Không có guild"
-            await self._strip_roles(discord_guild, player_id, ign, current_guild_name, guest_role_id, log_channel_id)
+            outcome = await self._strip_roles(discord_guild, player_id, ign, current_guild_name, guest_role_id, log_channel_id)
+            if outcome == STRIP_RETRY:
+                next_members[player_id] = ign  # giữ _missing_counts để chu kỳ sau thử lại ngay
+            else:
+                self._missing_counts.pop(player_id, None)
 
         # 6. Lưu snapshot đã cập nhật
         new_snap = {
@@ -545,30 +591,37 @@ class GuildCheckCog(commands.Cog):
             print(f"[guild_leave_watcher] Lỗi lưu snapshot sau xử lý: {e}")
 
     async def _strip_roles(self, discord_guild: discord.Guild, player_id: str, ign: str, current_guild_name: str, guest_role_id: str, log_channel_id: str):
-        """Tìm Discord member theo registry ĐÃ XÁC THỰC, gỡ toàn bộ role hợp lệ, gán guest_role, gửi log."""
+        """Trả STRIP_DONE / STRIP_SKIPPED (vĩnh viễn, không việc gì) / STRIP_RETRY (lỗi tạm thời, giữ registry)."""
         discord_member = None
         reg_discord_id = None
 
         rows, err = await async_execute(
             lambda c: c.table("member_registry").select("discord_id").eq("player_id", player_id).maybe_single()
         )
-        if not err and rows and hasattr(rows, "data") and rows.data:
+        if err:
+            print(f"[guild_leave_watcher] Lỗi tra registry của {ign} ({player_id}), thử lại sau: {err}")
+            return STRIP_RETRY
+        if rows and hasattr(rows, "data") and rows.data:
             reg_discord_id = rows.data.get("discord_id")
             if reg_discord_id:
                 try:
                     discord_member = discord_guild.get_member(int(reg_discord_id)) or await discord_guild.fetch_member(int(reg_discord_id))
-                except Exception:
-                    discord_member = None
+                except discord.NotFound:
+                    discord_member = None  # đã rời server: vĩnh viễn, không còn gì để gỡ
+                except Exception as e:
+                    print(f"[guild_leave_watcher] Lỗi fetch member {reg_discord_id}, thử lại sau: {e}")
+                    return STRIP_RETRY
 
         # CHỈ GỠ ROLE KHI CÓ LIÊN KẾT XÁC THỰC TRONG member_registry!
         # Tuyệt đối KHÔNG fallback đoán mò theo nickname để tránh gỡ nhầm người chưa liên kết.
         if not discord_member or not reg_discord_id:
-            print(f"[guild_leave_watcher] Bỏ qua {ign} ({player_id}): Chưa liên kết trong member_registry.")
-            return
+            print(f"[guild_leave_watcher] Bỏ qua {ign} ({player_id}): Chưa liên kết hoặc đã rời server.")
+            return STRIP_SKIPPED
 
         bot_top_role = discord_guild.me.top_role
         removed_roles = []
         notes = []
+        failed = False
 
         if discord_member:
             # Lọc role có thể gỡ
@@ -585,6 +638,7 @@ class GuildCheckCog(commands.Cog):
                     removed_roles = [r.name for r in removable]
                 except Exception as e:
                     notes.append(f"⚠️ Lỗi gỡ role: `{e}`")
+                    failed = True
 
             # Gán guest_role nếu có cấu hình
             if guest_role_id and str(guest_role_id).isdigit():
@@ -594,10 +648,15 @@ class GuildCheckCog(commands.Cog):
                         await discord_member.add_roles(guest_role, reason=f"Gán role mặc định sau khi {ign} rời guild")
                     except Exception as e:
                         notes.append(f"⚠️ Lỗi gán role khách: `{e}`")
+                        failed = True
 
             # Xóa registry entry sau khi strip
             if reg_discord_id:
-                await registry_delete(reg_discord_id)
+                if failed:
+                    print(f"[guild_leave_watcher] Gỡ role {ign} chưa thành công, giữ registry để thử lại.")
+                    return STRIP_RETRY
+                if await registry_delete(reg_discord_id):
+                    return STRIP_RETRY
 
         # Tạo embed log
         embed = discord.Embed(
@@ -611,7 +670,7 @@ class GuildCheckCog(commands.Cog):
             embed.add_field(name="💬 Discord", value=discord_member.mention, inline=True)
             embed.add_field(
                 name="🗑️ Role đã gỡ",
-                value=", ".join(f"`{r}`" for r in removed_roles) if removed_roles else "_(không có role nào cần gỡ)_",
+                value=_clip(", ".join(f"`{r}`" for r in removed_roles), FIELD_LIMIT) if removed_roles else "_(không có role nào cần gỡ)_",
                 inline=False,
             )
             if guest_role_id and str(guest_role_id).isdigit():
@@ -621,10 +680,11 @@ class GuildCheckCog(commands.Cog):
             embed.add_field(name="💬 Discord", value="❓ Không tìm thấy nick khớp trên server", inline=True)
 
         if notes:
-            embed.add_field(name="⚠️ Ghi chú", value="\n".join(notes), inline=False)
+            embed.add_field(name="⚠️ Ghi chú", value=_clip("\n".join(notes), FIELD_LIMIT), inline=False)
 
         embed.set_footer(text="Tự động gỡ role bởi GuildCheck • Albion Online API")
         await self._send_log(discord_guild, log_channel_id, embed)
+        return STRIP_DONE
 
     async def _send_log(self, discord_guild: discord.Guild, log_channel_id: str, embed: discord.Embed):
         if not log_channel_id or not str(log_channel_id).isdigit():
@@ -997,6 +1057,11 @@ class GuildCheckCog(commands.Cog):
             return await interaction.response.send_message("❌ Bạn không có quyền Officer!", ephemeral=True)
 
         await interaction.response.defer(ephemeral=False)
+        # Phải đợi watcher (không bỏ qua) để snapshot/retry không bị ghi đè và không strip trùng.
+        async with self._watch_lock:
+            await self._forcestrip_locked(interaction)
+
+    async def _forcestrip_locked(self, interaction: discord.Interaction):
         guild = interaction.guild
         if not guild:
             return await interaction.followup.send("❌ Lệnh này chỉ dùng trong server Discord!", ephemeral=False)
@@ -1035,6 +1100,7 @@ class GuildCheckCog(commands.Cog):
         stripped_list = []
         kept_count = 0
         api_error_count = 0
+        retry_members = {}  # strip lỗi tạm thời: giữ trong snapshot để watcher thử lại
 
         # 3. Quét từng thành viên đã đăng ký
         for row in registered:
@@ -1069,16 +1135,19 @@ class GuildCheckCog(commands.Cog):
 
             # Xác nhận out guild -> gỡ role
             current_guild_name = p_info.get("GuildName") or "Không có guild"
-            await self._strip_roles(guild, player_id, ign, current_guild_name, guest_role_id, log_channel_id)
-            tag = f"<@{discord_id}>" if discord_id else ign
-            stripped_list.append(f"{tag} (**{ign}** → `{current_guild_name}`)")
+            outcome = await self._strip_roles(guild, player_id, ign, current_guild_name, guest_role_id, log_channel_id)
+            if outcome == STRIP_DONE:
+                tag = f"<@{discord_id}>" if discord_id else _clip(ign, 40)
+                stripped_list.append(f"{tag} (**{_clip(ign, 40)}** → `{_clip(current_guild_name, 40)}`)")
+            elif outcome == STRIP_RETRY:
+                retry_members[player_id] = ign
 
         # 4. Cập nhật lại snapshot mới nhất
         new_snap = {
             "guild_id": guild_id_albion,
             "region": region,
             "updated_at": datetime.now(timezone.utc).isoformat(),
-            "members": in_game_members,
+            "members": {**in_game_members, **retry_members},
         }
         try:
             await save_guildcheck_snapshot(new_snap)
@@ -1096,11 +1165,15 @@ class GuildCheckCog(commands.Cog):
         embed.add_field(name="🚨 Đã gỡ role (out guild)", value=f"`{len(stripped_list)}`", inline=True)
 
         if stripped_list:
-            chunk = stripped_list[:25]
-            more = f"\n_...và {len(stripped_list) - 25} người khác._" if len(stripped_list) > 25 else ""
-            embed.add_field(name="🗑️ Danh sách đã xử lý", value="\n".join(chunk) + more, inline=False)
-        else:
+            embed.add_field(name="🗑️ Danh sách đã xử lý", value=_fit_lines(stripped_list), inline=False)
+        elif not retry_members:
             embed.description = "✅ Tất cả thành viên đã đăng ký đều đang ở trong guild TNC in-game!"
+        if retry_members:
+            embed.add_field(
+                name="⚠️ Gỡ role thất bại (sẽ thử lại ở chu kỳ sau)",
+                value=_fit_lines([f"**{_clip(name, 40)}**" for name in retry_members.values()]),
+                inline=False,
+            )
 
         if api_error_count > 0:
             embed.set_footer(text=f"⚠️ Bỏ qua {api_error_count} người do API Albion tạm thời lỗi.")

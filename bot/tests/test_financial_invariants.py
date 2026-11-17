@@ -64,7 +64,13 @@ def test_core_unknown_bank_result_is_claimed_once_and_not_retried(monkeypatch):
     }
     recipient = SimpleNamespace(id=456, bot=False, mention="<@456>")
     officer = SimpleNamespace(id=789, mention="<@789>")
-    message = SimpleNamespace(author=recipient, content="proof", id=300)
+    class _Reaction:
+        emoji = "green"
+
+        async def users(self):
+            yield officer
+
+    message = SimpleNamespace(author=recipient, content="proof", id=300, reactions=[_Reaction()])
     channel = mock.Mock()
     channel.fetch_message = mock.AsyncMock(return_value=message)
     channel.send = mock.AsyncMock()
@@ -365,6 +371,7 @@ def test_sp_update_acknowledges_before_download_and_atomic_import(monkeypatch):
             "player_name": "Ada",
             "amount": 10,
             "log_timestamp": "2026-10-01 12:00:00",
+            "reason": "Deposit",
         }]
         return {"applied": 1, "skipped": 0, "last_update": "2026-10-01 12:00:00"}
 
@@ -373,8 +380,10 @@ def test_sp_update_acknowledges_before_download_and_atomic_import(monkeypatch):
 
     monkeypatch.setattr(siphoned.aiohttp, "ClientSession", FakeSession)
     monkeypatch.setattr(siphoned, "apply_sp_import", import_rows)
+    monkeypatch.setattr(siphoned, "is_officer", lambda member: True)
     cog = siphoned.SiphonedCog(mock.Mock())
     interaction = SimpleNamespace(
+        user=object(),
         response=SimpleNamespace(defer=mock.AsyncMock(side_effect=lambda: events.append("defer"))),
         followup=SimpleNamespace(send=mock.AsyncMock(side_effect=followup)),
     )

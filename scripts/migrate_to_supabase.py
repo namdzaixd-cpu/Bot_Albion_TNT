@@ -8,6 +8,7 @@ from _legacy_snapshot import (
     read_snapshot_json,
     resolve_snapshot_dir,
 )
+from _sp_snapshot import import_sp_snapshot
 
 
 SOURCE_FILES = (
@@ -65,15 +66,6 @@ def import_snapshot(snapshot: dict[str, object], client) -> int:
         _upsert_chunks(client, "user_activity", records)
         imported += 1
 
-    sp_data = snapshot.get("tnc_sp_v32.json")
-    if sp_data is not None:
-        records = [
-            {"user_id": user_id, "silver_pieces": int(amount)}
-            for user_id, amount in sp_data.get("history", {}).items()
-        ]
-        _upsert_chunks(client, "user_economy", records)
-        imported += 1
-
     tts_data = snapshot.get("tnc_tts_config_v1.json")
     if tts_data is not None:
         client.table("alo_tts_config").upsert(
@@ -86,6 +78,12 @@ def import_snapshot(snapshot: dict[str, object], client) -> int:
             on_conflict="id",
             ignore_duplicates=True,
         ).execute()
+        imported += 1
+
+    # Last: a populated SP target is rejected, and that must not skip the other files.
+    sp_data = snapshot.get("tnc_sp_v32.json")
+    if sp_data is not None:
+        import_sp_snapshot(sp_data, client)
         imported += 1
     return imported
 

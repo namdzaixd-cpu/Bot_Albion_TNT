@@ -20,6 +20,13 @@ jobs:
           pip install -r requirements.txt
           pip install pytest
 
+      - name: Enable disposable PostgreSQL regression tools
+        run: |
+          PG_BINDIR="$(pg_config --bindir)"
+          test -x "$PG_BINDIR/initdb"
+          test -x "$PG_BINDIR/pg_ctl"
+          echo "$PG_BINDIR" >> "$GITHUB_PATH"
+
       - name: Syntax check (compileall)
         run: python -m compileall -q bot
 

@@ -1,9 +1,10 @@
 "use client";
 
-import { useRef, useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useSession, signIn } from "next-auth/react";
 import SearchableSelect, { Option } from "@/components/SearchableSelect";
+import { enqueueSave } from "@/lib/clientSaveQueue";
 import AIDashboard from "./ai/page";
 import LogsDashboard from "./logs/page";
 import CoreBankDashboard from "./corebank/page";
@@ -51,13 +52,6 @@ export default function Dashboard() {
     member_role_id: ""
   });
   const [loading, setLoading] = useState(true);
-  const saveQueue = useRef<Promise<void>>(Promise.resolve());
-  const serializeSave = (save: () => Promise<void>) => {
-    const pending = saveQueue.current.then(save, save);
-    saveQueue.current = pending;
-    return pending;
-  };
-
   // Discord Data
   const [discordChannels, setDiscordChannels] = useState<Option[]>([]);
   const [discordRoles, setDiscordRoles] = useState<Option[]>([]);
@@ -99,7 +93,7 @@ export default function Dashboard() {
 
   const handleConfigChange = (field: string, value: string) => {
     setConfig(prev => ({ ...prev, [field]: value }));
-    void serializeSave(async () => {
+    void enqueueSave(async () => {
       try {
         const response = await fetch('/api/config', {
           method: 'PATCH',
@@ -150,7 +144,7 @@ export default function Dashboard() {
     const newVal = !allEnabled;
     setAllEnabled(newVal);
     setToggling(true);
-    await serializeSave(async () => {
+    await enqueueSave(async () => {
       try {
         const response = await fetch('/api/modules', {
           method: 'PATCH',

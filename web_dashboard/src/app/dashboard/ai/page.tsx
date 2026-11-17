@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { Bot, MessageSquare, Zap, Book, Eye } from "lucide-react";
 import { toast } from "react-hot-toast";
 import MultiSearchableSelect, { Option } from "@/components/MultiSearchableSelect";
+import { enqueueSave, loadAfterSaves } from "@/lib/clientSaveQueue";
 
 export default function AIDashboard() {
   const [channels, setChannels] = useState<Option[]>([]);
@@ -15,29 +16,47 @@ export default function AIDashboard() {
     library_channel_ids: [] as string[],
     vision_channels: [] as string[]
   });
-  const saveQueue = useRef<Promise<void>>(Promise.resolve());
+  const [loadState, setLoadState] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     fetch('/api/discord-data')
       .then(res => (res.ok ? res.json() : null))
       .then(data => {
         if (data?.channels) setChannels(data.channels);
-      });
-
-    fetch('/api/ai-config')
-      .then(res => (res.ok ? res.json() : null))
-      .then(data => {
-        if (data && !data.error) {
-          setConfig({
-            model: data.model || "inclusionai/ling-3.0-flash:free",
-            intercept_channels: data.intercept_channels || [],
-            autowiki_channels: data.autowiki_channels || [],
-            library_channel_ids: data.library_channel_ids || [],
-            vision_channels: data.vision_channels || []
-          });
-        }
-      });
+      })
+      .catch(() => undefined);
   }, []);
+
+  useEffect(() => {
+    let alive = true;
+    loadAfterSaves(async () => {
+      const res = await fetch('/api/ai-config');
+      const data = res.ok ? await res.json() : null;
+      if (!data || typeof data !== 'object' || data.error) throw new Error('load failed');
+      return data;
+    })
+      .then(data => {
+        if (!alive) return;
+        setConfig({
+          model: data.model || "inclusionai/ling-3.0-flash:free",
+          intercept_channels: data.intercept_channels || [],
+          autowiki_channels: data.autowiki_channels || [],
+          library_channel_ids: data.library_channel_ids || [],
+          vision_channels: data.vision_channels || []
+        });
+        setLoadState('ready');
+      })
+      .catch(() => {
+        if (alive) setLoadState('error');
+      });
+    return () => { alive = false; };
+  }, [attempt]);
+
+  const retryLoad = () => {
+    setLoadState('loading');
+    setAttempt(value => value + 1);
+  };
 
   const queueSave = (patch: Record<string, unknown>) => {
     const save = async () => {
@@ -60,7 +79,7 @@ export default function AIDashboard() {
         toast.error("Lỗi mạng!", { position: 'bottom-right' });
       }
     };
-    saveQueue.current = saveQueue.current.then(save, save);
+    void enqueueSave(save);
   };
 
   const handleChange = (
@@ -83,6 +102,18 @@ export default function AIDashboard() {
         </div>
       </div>
 
+      {loadState !== 'ready' ? (
+        <div role={loadState === 'error' ? 'alert' : 'status'} aria-busy={loadState === 'loading'} className="bg-surface border border-border rounded-xl p-6 shadow-sm text-sm text-text-muted flex items-center justify-between gap-4">
+          {loadState === 'loading' ? (
+            <span>Đang tải cấu hình AI...</span>
+          ) : (
+            <>
+              <span className="text-red-400">Không tải được cấu hình AI. Chưa thể chỉnh sửa.</span>
+              <button onClick={retryLoad} className="px-3 py-1.5 rounded-lg border border-border text-white hover:bg-surface-hover">Thử lại</button>
+            </>
+          )}
+        </div>
+      ) : (
       <div className="bg-surface border border-border rounded-xl p-6 shadow-sm space-y-6">
         {/* Model Selection */}
         <div>
@@ -156,6 +187,7 @@ export default function AIDashboard() {
           </div>
         </div>
       </div>
+      )}
     </div>
   );
 }

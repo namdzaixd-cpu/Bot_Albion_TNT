@@ -69,11 +69,24 @@ def clean_text_for_tts(message: discord.Message) -> str:
     return text.strip()
 
 
+def _remove_tts_file(path: str) -> None:
+    try:
+        os.remove(path)
+    except FileNotFoundError:
+        pass
+    except OSError as error:
+        print(f"❌ [ALO-TTS] Không xóa được audio tạm: {error}")
+
+
 def generate_tts_file(text: str) -> str:
     fd, path = tempfile.mkstemp(suffix=".mp3", dir=DATA_DIR)
     os.close(fd)
-    tts = gTTS(text=text, lang="vi")
-    tts.save(path)
+    try:
+        tts = gTTS(text=text, lang="vi", timeout=15)
+        tts.save(path)
+    except Exception:
+        _remove_tts_file(path)
+        raise
     return path
 
 
@@ -91,6 +104,13 @@ class AloTtsCog(commands.Cog):
         self.tts_workers = {}
         # cờ đánh dấu đã chạy tự động vào lại voice sau khi khởi động (tránh reconnect storm khi gateway resume)
         self._startup_reconnect_done = False
+
+    async def cog_unload(self):
+        workers = list(self.tts_workers.values())
+        for worker in workers:
+            worker.cancel()
+        if workers:
+            await asyncio.gather(*workers, return_exceptions=True)
 
     async def enqueue_tts(
         self, guild: discord.Guild, text: str, author_name: str, source_channel_id: int
@@ -123,20 +143,28 @@ class AloTtsCog(commands.Cog):
             if not vc or not vc.is_connected() or vc.channel.id != source_channel_id:
                 continue
 
+            generated = asyncio.ensure_future(
+                self.bot.loop.run_in_executor(None, generate_tts_file, text)
+            )
             try:
-                path = await self.bot.loop.run_in_executor(None, generate_tts_file, text)
-            except Exception as e:
-                print(f"❌ [ALO-TTS] Lỗi tạo audio: {e}")
+                path = await asyncio.shield(generated)
+            except asyncio.CancelledError:
+                # Executor work cannot be cancelled; clean its result when it finishes.
+                def clean_generated(future):
+                    if not future.cancelled() and future.exception() is None:
+                        _remove_tts_file(future.result())
+                generated.add_done_callback(clean_generated)
+                raise
+            except Exception as error:
+                print(f"❌ [ALO-TTS] Lỗi tạo audio: {error}")
                 continue
 
             finished = asyncio.Event()
+            source = None
+            playing = False
 
-            def after_play(err, path=path):
-                try:
-                    os.remove(path)
-                except Exception as e:
-                    print(f"[Error] {e}")
-                    pass
+            def after_play(error, path=path):
+                _remove_tts_file(path)
                 self.bot.loop.call_soon_threadsafe(finished.set)
 
             try:
@@ -150,16 +178,23 @@ class AloTtsCog(commands.Cog):
                     or not vc.is_connected()
                     or vc.channel.id != source_channel_id
                 ):
-                    try:
-                        os.remove(path)
-                    except FileNotFoundError:
-                        pass
                     continue
-                # Giới hạn tối đa 1 phút/đoạn bằng option ffmpeg "-t 60"
-                vc.play(discord.FFmpegPCMAudio(path, options="-t 60"), after=after_play)
+                source = discord.FFmpegPCMAudio(path, options="-t 60")
+                vc.play(source, after=after_play)
+                playing = True
                 await finished.wait()
+            except asyncio.CancelledError:
+                if playing:
+                    vc.stop()
+                raise
             except Exception as error:
                 print(f"❌ [ALO-TTS] Lỗi phát audio: {error}")
+            finally:
+                try:
+                    if source is not None:
+                        source.cleanup()
+                finally:
+                    _remove_tts_file(path)
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):

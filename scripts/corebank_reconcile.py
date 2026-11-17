@@ -3,7 +3,8 @@
 This helper never calls UnbelievaBoat. Confirm the provider outcome independently
 before running it; `not_paid` makes a credit eligible only after a fresh reaction
 sequence, and `refund_not_applied` restores the credited state so an Officer can
-re-add then remove the reaction to explicitly start a new refund attempt.
+re-add then remove the reaction to explicitly start a new refund attempt. `not_paid` on a
+`pending` claim is refused unless you pass --worker-stopped; claim age alone proves nothing.
 """
 from __future__ import annotations
 
@@ -37,6 +38,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--emoji-key", help="Required to complete a legacy row without an emoji snapshot")
     parser.add_argument("--core-name", help="Required to complete a legacy row without a name snapshot")
     parser.add_argument("--core-display", help="Required to complete a legacy row without a display snapshot")
+    parser.add_argument(
+        "--worker-stopped",
+        action="store_true",
+        help="Required for not_paid on a still-pending claim: confirms the bot worker is stopped so no provider call is in flight",
+    )
     return parser
 
 
@@ -53,6 +59,7 @@ def reconcile(args) -> dict:
         "p_emoji_key": args.emoji_key,
         "p_core_name": args.core_name,
         "p_core_display": args.core_display,
+        "p_worker_quiesced": args.worker_stopped,
     }
     response, error = execute(
         lambda client: client.rpc("reconcile_core_credit", params),
