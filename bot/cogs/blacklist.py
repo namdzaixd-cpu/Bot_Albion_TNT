@@ -3,25 +3,11 @@ from discord import app_commands
 from discord.ext import commands
 import datetime
 import aiohttp
-from typing import Optional
 
 from core.permissions import is_officer
 from core.db import async_execute
 
 class GlobalBlacklist:
-    async def check_blacklist(self, discord_id: str, ingame_id: str) -> Optional[dict]:
-        try:
-            res, err = await async_execute(lambda c: c.table("blacklist").select("*")
-                               .or_(f"discord_id.eq.{discord_id},ingame_id.eq.{ingame_id}"))
-            if err:
-                print(f"[Error] Lỗi khi check_blacklist Supabase: {err}")
-                return None
-            if res and res.data:
-                return res.data[0]
-        except Exception as e:
-            print(f"[Error] Lỗi khi check_blacklist Supabase: {e}")
-        return None
-
     async def add_entry(self, discord_id: str, ingame_name: str, ingame_id: str, reason: str, officer_id: str, guild_id: str) -> bool:
         try:
             new_entry = {
@@ -43,19 +29,22 @@ class GlobalBlacklist:
             return False
 
     async def remove_entry(self, identifier: str) -> bool:
+        # Khớp theo Discord ID trước, không thấy thì khớp tên ingame (không phân biệt hoa thường, escape wildcard).
+        like = identifier.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         try:
-            res, err = await async_execute(lambda c: c.table("blacklist").select("*")
-                               .or_(f"discord_id.eq.{identifier},ingame_name.ilike.{identifier}"))
-            if err:
-                print(f"[Error] Lỗi khi remove_entry query: {err}")
-                return False
-            if res and res.data:
-                for entry in res.data:
-                    _, e2 = await async_execute(lambda c: c.table("blacklist").delete().eq("discord_id", entry["discord_id"]))
-                    if e2:
-                        print(f"[Error] Lỗi khi delete entry: {e2}")
-                        return False
-                return True
+            for build in (lambda c: c.table("blacklist").select("discord_id").eq("discord_id", identifier),
+                          lambda c: c.table("blacklist").select("discord_id").ilike("ingame_name", like)):
+                res, err = await async_execute(build)
+                if err:
+                    print(f"[Error] Lỗi khi remove_entry query: {err}")
+                    return False
+                if res and res.data:
+                    for entry in res.data:
+                        _, e2 = await async_execute(lambda c, d=entry["discord_id"]: c.table("blacklist").delete().eq("discord_id", d))
+                        if e2:
+                            print(f"[Error] Lỗi khi delete entry: {e2}")
+                            return False
+                    return True
         except Exception as e:
             print(f"[Error] Lỗi khi remove_entry Supabase: {e}")
         return False

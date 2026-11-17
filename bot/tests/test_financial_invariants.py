@@ -229,7 +229,9 @@ def test_split_attachment_failure_keeps_original_message():
 
     asyncio.run(cog.on_message(message))
 
-    assert channel.send.await_count == 1
+    # 1 ảnh đã tách thành công + 1 cảnh báo officer vì tách lỗi giữa chừng.
+    assert channel.send.await_count == 2
+    assert "Tách ảnh bị lỗi" in channel.send.await_args.args[0]
     message.delete.assert_not_awaited()
 
 

@@ -113,23 +113,6 @@ async def albion_get_guild_members(region, guild_id):
         return None
 
 
-async def albion_get_guild_info(region, guild_id):
-    """Lấy thông tin tổng quan của Guild từ API SBI."""
-    base = REGION_API_BASE.get(region)
-    if not base or not guild_id:
-        return None
-    url = f"{base}/guilds/{guild_id}"
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as r:
-                if r.status != 200:
-                    return None
-                return await r.json()
-    except Exception as e:
-        print(f"[albion_get_guild_info] Lỗi: {e}")
-        return None
-
-
 async def albion_get_player_by_id(region, player_id):
     """Lấy thông tin chi tiết 1 player theo player_id để double-check GuildId."""
     base = REGION_API_BASE.get(region)
@@ -1278,13 +1261,11 @@ class GuildCheckCog(commands.Cog):
             }
 
         matched_ingame = set()
-        matched_discord = set()
 
         for lower_ign, orig_ign in ingame_map.items():
             for d_id, d_info in discord_users.items():
                 if lower_ign == d_info["raw_lower"] or lower_ign in d_info["tokens"]:
                     matched_ingame.add(orig_ign)
-                    matched_discord.add(d_id)
                     break
 
         unmatched_ingame = [orig for lower, orig in ingame_map.items() if orig not in matched_ingame]

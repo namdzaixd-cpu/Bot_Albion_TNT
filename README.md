@@ -30,6 +30,7 @@ web_dashboard/        Dashboard web Next.js (Discord OAuth2)
 | **GuildCheck** | `/guildconfig`, `/guildcheck`, `/guildmembers`, `/guildaudit`, `/guildwhitelist`, `/newmembers [days]`, `/registertnc`, `/unregistertnc`, `/registerlist`, `/forcestrip` | Cấu hình guild, tra cứu thành viên in-game, hiển thị bảng phân trang thành viên guild & fame, đối soát nhân sự In-game vs Discord (hỗ trợ whitelist IGN acc phụ/bot), đăng ký IGN ↔ Discord (phân trang trực tiếp), **tự động gỡ role khi thành viên rời guild in-game**, lệnh `/forcestrip` quét & gỡ role ngay lập tức |
 | **Alo (TTS)** | `/alojoin`, `/aloleave`, `/alonametoggle`, `/alo`, `/aloconfig`, `/alomute`, `/alounmute` | Đọc tin nhắn text thành giọng nói (gTTS) vào voice channel, tự rejoin khi rớt mạng |
 | **Core-Bank** | `/coresetup`, `/coreadd`, `/coreremove`, `/coreautoreact`, `/corelist` | Tự động thả emoji reaction lên ảnh core nộp vào kênh, quy đổi ra giá trị silver |
+| **Blacklist** | `/blacklist add`, `/blacklist remove`, `/blacklist view` | Danh sách đen liên minh (Officer), lưu bảng `blacklist`, đồng bộ với trang Blacklist của dashboard |
 | **Update Translator** | `/utconfig`, `/utstatus` | Tự tạo thread cho mỗi tin mới trong kênh `#update`, AI đặt tiêu đề + dịch sang tiếng Việt (Gemini), react 🇻🇳 để dịch lại tin cũ |
 | **AI Chatbot** | _(chạy trên bot riêng — xem [TNC-Chatbot](https://github.com/kudominer/TNC-Chatbot))_ | Tag bot AI để chat, `/wiki`, `/iteminfo`, tóm tắt kênh, learning |
 

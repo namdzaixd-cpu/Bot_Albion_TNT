@@ -193,6 +193,11 @@ class CoreBankCog(commands.Cog):
                                 all_reposted = False
                                 print(f"⚠️ [Core-Bank] Lỗi khi tách ảnh: {e}")
 
+                        if not all_reposted:
+                            await message.channel.send(
+                                f"⚠️ {message.author.mention} Tách ảnh bị lỗi giữa chừng; tin gốc được giữ lại. "
+                                "Officer chỉ chấm một bản (gốc hoặc ảnh đã tách), không chấm cả hai."
+                            )
                         if all_reposted:
                             try:
                                 await message.delete()

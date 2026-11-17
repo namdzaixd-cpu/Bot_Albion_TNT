@@ -33,6 +33,12 @@ FEATURE_FIELDS = [
         "`/masstemplatedelete` (xóa template — Officer)",
     ),
     (
+        "🚫 Blacklist",
+        "`/blacklist add` (thêm người vào danh sách đen liên minh — Officer)\n"
+        "`/blacklist remove` (gỡ theo Discord ID hoặc IGN — Officer)\n"
+        "`/blacklist view` (xem danh sách đen — Officer)",
+    ),
+    (
         "🛡️ GuildCheck",
         "`/guildconfig` (cấu hình GuildCheck, kênh log, role khách, bật tự động gỡ role — Officer)\n"
         "`/guildcheck` (tra cứu nhanh 1 IGN có trong guild không)\n"

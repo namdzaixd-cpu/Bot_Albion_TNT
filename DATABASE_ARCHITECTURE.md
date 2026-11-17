@@ -69,7 +69,7 @@ python scripts/apply_schema.py
 
 Runner lấy `DIRECT_URL` hoặc `DATABASE_URL` từ environment, không đọc dotenv khi import, không split SQL bằng dấu `;`, không log connection string có password. Dependency: `psycopg[binary]` trong requirements. Thay đổi schema qua cơ chế SQL đã version hóa; `node scripts/db-exec.js "SQL_DDL"` vẫn là tiện ích DDL theo quy tắc repo khi chạy trên DB được cấp quyền.
 
-`scripts/migration.sql` là snapshot lịch sử chứa UPSERT số dư/watermark/config; **không áp file này để bootstrap/upgrade DB đang hoạt động**. `schema_v2.sql` là migration lịch sử, không nằm trong runner hiện hành. Không reset/truncate hoặc seed snapshot vận hành để migration xanh.
+Snapshot lịch sử `migration.sql` và `schema_v2.sql` đã bị xóa khỏi repo; chỉ `schema.sql` + `migrations/*` là nguồn schema. Không reset/truncate hoặc seed dữ liệu vận hành để migration xanh.
 
 Bootstrap tạo đủ bảng trước FK/index/RLS/RPC. Upgrade additive giữ dữ liệu legacy; FK `NOT VALID` giữ orphan cũ mà vẫn kiểm tra writes mới. Cần đối soát orphan có chủ đích trước validate, không map nhãn nguồn thành guild ID giả. RLS và table privileges chỉ cho backend service role; RPC state-changing chỉ service-role execute.
 

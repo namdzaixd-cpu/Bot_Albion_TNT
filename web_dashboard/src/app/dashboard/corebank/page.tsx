@@ -23,13 +23,13 @@ export default function CoreBankDashboard() {
 
   useEffect(() => {
     fetch('/api/discord-data')
-      .then(res => res.json())
+      .then(res => (res.ok ? res.json() : null))
       .then(data => {
-        if (data.channels) setChannels(data.channels);
+        if (data?.channels) setChannels(data.channels);
       });
 
     fetch('/api/corebank')
-      .then(res => res.json())
+      .then(res => (res.ok ? res.json() : null))
       .then(data => {
         if (data && !data.error) {
           setConfig({

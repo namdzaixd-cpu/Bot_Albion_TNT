@@ -20,6 +20,6 @@ export async function GET() {
     });
   } catch (error: any) {
     console.error("Lỗi lấy discord data:", error.message);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ error: "Không thể tải dữ liệu Discord." }, { status: 500 });
   }
 }

@@ -14,7 +14,7 @@ export async function GET() {
 
     if (error) {
       console.error('Error fetching logs:', error);
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      return NextResponse.json({ error: 'Không thể tải logs.' }, { status: 500 });
     }
 
     // Đảo ngược lại mảng để render từ trên xuống dưới (từ cũ đến mới)
@@ -51,7 +51,7 @@ export async function DELETE() {
 
     if (error) {
       console.error('Error clearing logs:', error);
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      return NextResponse.json({ error: 'Không thể xóa logs.' }, { status: 500 });
     }
 
     return NextResponse.json({ success: true });

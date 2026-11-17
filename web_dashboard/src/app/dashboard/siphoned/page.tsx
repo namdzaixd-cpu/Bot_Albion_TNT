@@ -25,7 +25,7 @@ export default function SiphonedDashboard() {
 
   const filteredAndSorted = useMemo(() => {
     let result = leaderboard.filter(entry => 
-      entry.user_id.toLowerCase().includes(searchTerm.toLowerCase())
+      (entry.user_id ?? "").toLowerCase().includes(searchTerm.toLowerCase())
     );
 
     result.sort((a, b) => {

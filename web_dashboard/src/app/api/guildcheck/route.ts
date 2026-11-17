@@ -49,7 +49,7 @@ export async function GET() {
     const guild = await fetchGuild();
     return NextResponse.json(guild);
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : "Lỗi";
-    return NextResponse.json({ error: msg }, { status: 502 });
+    console.error("Lỗi lấy guild:", err);
+    return NextResponse.json({ error: "Không thể tải thông tin guild." }, { status: 502 });
   }
 }

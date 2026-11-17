@@ -1,6 +1,7 @@
 import os
 import asyncio
 from copy import deepcopy
+import time
 
 import discord
 from discord import app_commands
@@ -15,6 +16,15 @@ from core.storage import load_json_async, save_json_async
 # ==============================================================================
 MASSING_FILE = os.path.join(STORAGE_DIR, "tnc_massing_v1.json")
 TEMPLATES_FILE = os.path.join(STORAGE_DIR, "tnc_templates_v1.json")
+WEEKLY_CLEAR_FILE = os.path.join(STORAGE_DIR, "tnc_massing_lastclear_v1.json")
+WEEKLY_CLEAR_SECONDS = 7 * 24 * 3600
+
+
+def weekly_clear_wait(last_clear, now):
+    """Số giây còn lại tới lần dọn kế tiếp (0 nếu đã quá hạn)."""
+    return max(0.0, WEEKLY_CLEAR_SECONDS - (now - last_clear))
+
+
 
 active_parties = {}
 active_templates = {}
@@ -1171,6 +1181,7 @@ class ConfirmOverwriteTemplateView(discord.ui.View):
         self.key = key
         self.party = party
 
+    @discord.ui.button(label="✅ Ghi đè", style=discord.ButtonStyle.danger)
     async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not _templates_loaded:
             return await interaction.response.send_message("❌ Kho template chưa tải được.", ephemeral=True)
@@ -1316,11 +1327,26 @@ class MassingCog(commands.Cog):
                 print(f"❌ Không thể lưu dọn dẹp Massing; giữ nguyên party: {error}")
                 return
             print(f"🧹 [Auto-Clean] Đã xóa {count} party Massing cũ sau 7 ngày.")
+        try:
+            await save_json_async({"last_clear": time.time()}, WEEKLY_CLEAR_FILE)
+        except Exception as error:
+            print(f"⚠️ Không lưu được mốc dọn Massing: {error}")
 
     @weekly_clear_parties.before_loop
     async def before_weekly_clear(self):
         await self.bot.wait_until_ready()
-        await asyncio.sleep(168 * 60 * 60)
+        # Mốc dọn gần nhất lưu DB để restart/redeploy không reset đồng hồ 7 ngày.
+        now = time.time()
+        try:
+            data = await load_json_async(WEEKLY_CLEAR_FILE, dict)
+            last = data.get("last_clear")
+            if not isinstance(last, (int, float)):
+                last = now
+                await save_json_async({"last_clear": now}, WEEKLY_CLEAR_FILE)
+        except Exception as error:
+            print(f"⚠️ Không đọc được mốc dọn Massing, đợi đủ 7 ngày: {error}")
+            last = now
+        await asyncio.sleep(weekly_clear_wait(last, now))
 
     async def template_autocomplete(self, interaction: discord.Interaction, current: str):
         choices = []

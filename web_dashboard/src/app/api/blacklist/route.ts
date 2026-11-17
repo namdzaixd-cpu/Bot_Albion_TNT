@@ -17,6 +17,9 @@ function authorizeAdmin(session: Session | null) {
 }
 
 export async function GET() {
+  if (!(await getServerSession(authOptions))?.user) {
+    return NextResponse.json({ error: "Chưa đăng nhập" }, { status: 401 });
+  }
   try {
     const { data, error } = await supabase
       .from("blacklist")

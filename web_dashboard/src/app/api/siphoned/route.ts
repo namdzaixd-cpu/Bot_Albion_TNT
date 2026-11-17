@@ -17,7 +17,8 @@ export async function GET() {
       .order("silver_pieces", { ascending: false });
 
     if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      console.error("Lỗi lấy dữ liệu Siphoned:", error.message);
+      return NextResponse.json({ error: "Không thể tải dữ liệu Siphoned." }, { status: 500 });
     }
 
     return NextResponse.json({
@@ -25,6 +26,7 @@ export async function GET() {
       leaderboard: economyData || []
     });
   } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    console.error("Lỗi lấy dữ liệu Siphoned:", err);
+    return NextResponse.json({ error: "Không thể tải dữ liệu Siphoned." }, { status: 500 });
   }
 }

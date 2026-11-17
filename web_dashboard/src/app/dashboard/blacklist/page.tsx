@@ -19,6 +19,7 @@ export default function BlacklistDashboard() {
   const fetchBlacklist = async () => {
     try {
       const res = await fetch('/api/blacklist');
+      if (!res.ok) return;
       const data = await res.json();
       if (Array.isArray(data)) setEntries(data);
     } catch (err) {
@@ -65,7 +66,7 @@ export default function BlacklistDashboard() {
     if (!confirm("Bạn có chắc muốn xóa người này khỏi Blacklist?")) return;
     
     try {
-      const res = await fetch(`/api/blacklist?discord_id=${discord_id}`, {
+      const res = await fetch(`/api/blacklist?discord_id=${encodeURIComponent(discord_id)}`, {
         method: 'DELETE'
       });
       if (res.ok) {

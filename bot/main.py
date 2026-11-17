@@ -16,6 +16,7 @@ from core.heartbeat import start as start_heartbeat
 # ==============================================================================
 EXTENSIONS = [
     "cogs.about",
+    "cogs.blacklist",
     "cogs.siphoned",
     "cogs.massing",
     "cogs.lastseen",
