@@ -236,8 +236,10 @@ class UpdateTranslatorCog(commands.Cog):
         try:
             thread = await self._get_or_create_thread(target, text)
             translated = await self._translate(text)
-            if translated:
-                await self._post_to_thread(thread, translated)
+            if not translated:
+                await message.reply("⚠️ Đã tạo thread nhưng chưa dịch được nội dung. Vui lòng thử lại.")
+                return
+            await self._post_to_thread(thread, translated)
             guild_id = message.guild.id if message.guild else 0
             link = f"https://discord.com/channels/{guild_id}/{thread.id}"
             await message.reply(f"✅ Đã tạo thread **#{thread.name}** + bản dịch: {link}")
@@ -246,7 +248,7 @@ class UpdateTranslatorCog(commands.Cog):
             await message.reply(f"❌ Lỗi khi tạo thread: `{e}`")
 
     async def _ensure_translation(self, message: discord.Message):
-        """Đảm bảo message có 1 thread + bản dịch tiếng Việt. Idempotent."""
+        """Serialize requests for a message; allow retries after completion or failure."""
         if message.id in self.in_progress:
             return
         self.in_progress.add(message.id)
@@ -265,6 +267,8 @@ class UpdateTranslatorCog(commands.Cog):
         except Exception as error:
             print(f"[UpdateTranslator] lỗi xử lý {message.id}: {error}")
             raise
+        finally:
+            self.in_progress.discard(message.id)
 
     async def _translate(self, text: str) -> str | None:
         prompt = (

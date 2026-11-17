@@ -50,15 +50,21 @@ class GlobalBlacklist:
         return False
 
     async def get_all(self):
-        try:
-            res, err = await async_execute(lambda c: c.table("blacklist").select("*"))
-            if err:
-                print(f"[Error] Lỗi khi get_all Supabase: {err}")
-                return []
-            return res.data or []
-        except Exception as e:
-            print(f"[Error] Lỗi khi get_all Supabase: {e}")
-            return []
+        entries = []
+        while True:
+            offset = len(entries)
+            response, error = await async_execute(
+                lambda client: client.table("blacklist").select("*")
+                .order("discord_id").range(offset, offset + 999)
+            )
+            if error:
+                raise RuntimeError(f"Không đọc được blacklist: {error}")
+            rows = response.data if response is not None else None
+            if rows is None:
+                raise RuntimeError("Không nhận được dữ liệu blacklist.")
+            if not rows:
+                return entries
+            entries.extend(rows)
 
 
 class BlacklistCog(commands.Cog):
@@ -85,7 +91,7 @@ class BlacklistCog(commands.Cog):
     blacklist_group = app_commands.Group(name="blacklist", description="Hệ thống Global Blacklist liên minh")
 
     @blacklist_group.command(name="add", description="Thêm một người chơi vào danh sách đen")
-    async def blacklist_add(self, interaction: discord.Interaction, user: discord.Member, ingame_name: str, reason: str):
+    async def blacklist_add(self, interaction: discord.Interaction, user: discord.Member, ingame_name: str, reason: app_commands.Range[str, 1, 500]):
         if not is_officer(interaction.user):
             await interaction.response.send_message("❌ Xin lỗi, chỉ Officer trở lên mới được quyền dùng lệnh này!", ephemeral=True)
             return
@@ -141,20 +147,42 @@ class BlacklistCog(commands.Cog):
             return
             
         await interaction.response.defer(ephemeral=True)
-        entries = await self.blacklist_db.get_all()
+        try:
+            entries = await self.blacklist_db.get_all()
+        except Exception as error:
+            await interaction.followup.send(f"❌ Không đọc được blacklist: `{error}`", ephemeral=True)
+            return
         if not entries:
             await interaction.followup.send("✅ Danh sách đen hiện đang trống.", ephemeral=True)
             return
             
-        embed = discord.Embed(title="📜 Global Blacklist", color=discord.Color.dark_red())
-        
+        pages = [""]
         for entry in entries:
-            discord_mention = f"<@{entry['discord_id']}>"
-            ingame = entry['ingame_name']
-            reason = entry['reason']
-            embed.add_field(name=f"Ingame: {ingame}", value=f"Discord: {discord_mention}\nLý do: {reason}", inline=False)
-            
-        await interaction.followup.send(embed=embed, ephemeral=True)
+            text = (
+                f"**Ingame: {entry['ingame_name']}**\n"
+                f"Discord: <@{entry['discord_id']}>\nLý do: {entry['reason']}\n\n"
+            )
+            while text:
+                room = 4000 - len(pages[-1])
+                if len(text) <= room:
+                    pages[-1] += text
+                    break
+                cut = text.rfind("\n", 0, room + 1)
+                if cut <= 0:
+                    if pages[-1]:
+                        pages.append("")
+                        continue
+                    cut = room
+                pages[-1] += text[:cut]
+                text = text[cut:].lstrip("\n")
+                pages.append("")
+        for index, description in enumerate(pages, 1):
+            if description:
+                embed = discord.Embed(
+                    title=f"📜 Global Blacklist — {index}/{len(pages)}",
+                    description=description, color=discord.Color.dark_red(),
+                )
+                await interaction.followup.send(embed=embed, ephemeral=True)
 
 
 async def setup(bot: commands.Bot):
